@@ -5,3 +5,13 @@
 This will be a staging spot for all my python scripts mostly. Hopefully use this to update pico w in the future possibly? 
 </p>
 
+Note 1:
+<p>
+Using thonny as my IDE for micropython on raspberry pi pico w.
+First thing to know is main.py will auto start with pico. Then you can call your other python scripts as needed really.
+</p>
+
+Note 2:
+<p>
+Grounding the RUN terminal will reset the Pico. I've jumped run to a button and the other side of the button to ground. Easy clickable reset.
+</p>
