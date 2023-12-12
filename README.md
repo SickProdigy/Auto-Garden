@@ -18,3 +18,5 @@ Note 2:
 <p>
 Grounding the RUN terminal will reset the Pico. I've jumped run to a button and the other side of the button to ground. Easy clickable reset.
 </p>
+
+Connections:
