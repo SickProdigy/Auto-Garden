@@ -20,3 +20,6 @@ Grounding the RUN terminal will reset the Pico. I've jumped run to a button and 
 </p>
 
 Connections:
+Raspberry pi is putting out 3v, use 3v-32vdc contactor/relay to switch on high voltage to fans, ac, heat, etc.
+
+Will need to take temperatures and humidity. Want to compensate AC with outside air if possible.
