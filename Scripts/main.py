@@ -6,7 +6,7 @@ ledMachine = machine.Pin("LED", machine.Pin.OUT)
 timer = Timer()
 
 def blink(timer):
-    led.toggle()
+    # led.toggle()
     ledMachine.toggle()
 
 timer.init(freq=2.5, mode=Timer.PERIODIC, callback=blink)
