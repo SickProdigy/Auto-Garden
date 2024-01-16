@@ -1,12 +1,12 @@
 from machine import Pin, Timer
 
 # First Testing Env
-# ledMachine = machine.Pin("LED", machine.Pin.OUT)
+ledMachine = machine.Pin("LED", machine.Pin.OUT)
 # led = Pin(12, Pin.OUT)
-# timer = Timer()
+timer = Timer()
 
-# def blink(timer):
-#     led.toggle()
-#     ledMachine.toggle()
+def blink(timer):
+    led.toggle()
+    ledMachine.toggle()
 
-# timer.init(freq=2.5, mode=Timer.PERIODIC, callback=blink)
+timer.init(freq=2.5, mode=Timer.PERIODIC, callback=blink)
