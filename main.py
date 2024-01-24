@@ -23,11 +23,11 @@ wifi = network.WLAN(network.STA_IF)
 wifi.active(True)   # must capitalize boolean statements!
 wifi.connect(secrets['ssid'], secrets['password'])
 
-print(wlan.ifconfig())
+print(wlan.ifconfig())   # no ip being applied
 
 #Proof connected
 led.on()
-print('Connected to Wi-Fi network')
+print('Connected to Wi-Fi network') # saying connected but not
 time.sleep(5)
 led.off()
 
