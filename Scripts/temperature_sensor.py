@@ -1,19 +1,74 @@
-import machine, onewire, ds18x20, time
+import machine
+import onewire
+import ds18x20
+import time
 
-ds_pin = machine.Pin(10)
-ds_sensor = ds18x20.DS18X20(onewire.OneWire(ds_pin))
+class TemperatureSensor:
+    def __init__(self, pin=10):
+        """Initialize DS18X20 temperature sensor on the specified pin."""
+        self.ds_pin = machine.Pin(pin)
+        self.ds_sensor = ds18x20.DS18X20(onewire.OneWire(self.ds_pin))
+        self.roms = []
+        self.scan_sensors()
+    
+    def scan_sensors(self):
+        """Scan for connected DS18X20 sensors."""
+        try:
+            self.roms = self.ds_sensor.scan()
+            print(f'Found {len(self.roms)} DS18X20 sensor(s)')
+            return self.roms
+        except Exception as e:
+            print(f'Error scanning sensors: {e}')
+            return []
+    
+    def read_temp_c(self, rom=None):
+        """Read temperature in Celsius. If rom=None, reads first sensor."""
+        try:
+            self.ds_sensor.convert_temp()
+            time.sleep_ms(750)
+            
+            if rom is None and self.roms:
+                rom = self.roms[0]
+            
+            if rom:
+                return self.ds_sensor.read_temp(rom)
+            return None
+        except Exception as e:
+            print(f'Error reading temperature: {e}')
+            return None
+    
+    def read_temp_f(self, rom=None):
+        """Read temperature in Fahrenheit."""
+        temp_c = self.read_temp_c(rom)
+        if temp_c is not None:
+            return temp_c * (9/5) + 32
+        return None
+    
+    def read_all_temps(self, unit='F'):
+        """Read all connected sensors. Returns dict of {rom: temp}."""
+        results = {}
+        try:
+            self.ds_sensor.convert_temp()
+            time.sleep_ms(750)
+            
+            for rom in self.roms:
+                temp_c = self.ds_sensor.read_temp(rom)
+                if unit.upper() == 'F':
+                    results[rom] = temp_c * (9/5) + 32
+                else:
+                    results[rom] = temp_c
+        except Exception as e:
+            print(f'Error reading temperatures: {e}')
+        
+        return results
 
-roms = ds_sensor.scan()
-print('Found DS devices: ', roms)
-
-while True:
-  ds_sensor.convert_temp()
-  time.sleep_ms(750)
-  for rom in roms:      # in a loop to get each sensor on the same pin since you can have multi sensors
-    print(rom)
-    tempC = ds_sensor.read_temp(rom)
-    tempF = tempC * (9/5) +32    # convert to farenheit
-    # print('temperature (ºC):', "{:.2f}".format(tempC))  # The result will have two decimal places {:.2f}
-    print('temperature (ºF):', "{:.2f}".format(tempF))
-    print()
-  time.sleep(5) # the loop will repeat every 5 seconds
+# Example usage / test code
+if __name__ == "__main__":
+    sensor = TemperatureSensor(pin=10)
+    
+    while True:
+        temps = sensor.read_all_temps(unit='F')
+        for rom, temp in temps.items():
+            print(f'Sensor {rom.hex()}: {temp:.2f}°F')
+        print()
+        time.sleep(5)
