@@ -59,6 +59,50 @@ class TemperatureMonitor(Monitor):
         for alert in alerts:
             send_discord_message(alert)
 
+class WiFiMonitor(Monitor):
+    """Monitor WiFi connection and handle reconnection."""
+    def __init__(self, wifi, led, interval=5, reconnect_cooldown=60):
+        super().__init__(interval)
+        self.wifi = wifi
+        self.led = led
+        self.reconnect_cooldown = reconnect_cooldown
+        self.last_reconnect_attempt = 0
+        self.was_connected = wifi.isconnected() if wifi else False
+    
+    def run(self):
+        """Check WiFi status, blink LED, attempt reconnect if needed."""
+        import network
+        from scripts.networking import connect_wifi
+        
+        is_connected = self.wifi.isconnected() if self.wifi else False
+        
+        if not is_connected:
+            # Fast blink when disconnected
+            self.led.on()
+            time.sleep(0.2)
+            self.led.off()
+            
+            # Try reconnect if cooldown passed
+            now = time.ticks_ms()
+            if time.ticks_diff(now, self.last_reconnect_attempt) >= (self.reconnect_cooldown * 1000):
+                self.last_reconnect_attempt = now
+                print("Attempting WiFi reconnect...")
+                self.wifi = connect_wifi(self.led)
+                
+                if self.wifi and self.wifi.isconnected():
+                    send_discord_message("WiFi connection restored 🔄")
+                    self.was_connected = True
+        else:
+            # Slow blink when connected
+            self.led.on()
+            time.sleep(1)
+            self.led.off()
+            
+            # Notify if connection was just restored
+            if not self.was_connected:
+                send_discord_message("WiFi connection restored 🔄")
+                self.was_connected = True
+
 def run_monitors(monitors):
     """
     Run all monitors in the list, checking if each should run based on interval.
