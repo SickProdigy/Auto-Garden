@@ -8,6 +8,7 @@ from secrets import secrets
 
 def send_discord_message(message, username="Auto Garden Bot"):
     resp = None
+    url = secrets.get('discord_webhook_url')
     try:
         payload = {"content": message, "username": username}
         body = json.dumps(payload)
@@ -17,24 +18,34 @@ def send_discord_message(message, username="Auto Garden Bot"):
             "Content-Type": "application/json",
             "Content-Length": str(len(body))
         }
-        resp = requests.post(secrets['discord_webhook_url'], data=body, headers=headers)
+
+        # DEBUG: print exact values being sent
+        print("DEBUG: webhook url repr:", repr(url))
+        print("DEBUG: body (bytes):", body)
+        print("DEBUG: headers:", headers)
+
+        resp = requests.post(url, data=body, headers=headers)
 
         status = getattr(resp, "status", getattr(resp, "status_code", None))
-        body_text = ""
+        text = ""
         try:
-            body_text = resp.text
-        except Exception:
+            text = resp.text
+        except:
             try:
-                body_text = resp.content
-            except Exception:
-                body_text = ""
+                text = resp.content
+            except:
+                text = "<no body>"
+
+        print("DEBUG: resp status:", status)
+        print("DEBUG: resp body:", text)
 
         if status and 200 <= status < 300:
             print("Discord message sent")
             return True
         else:
-            print("Discord webhook HTTP", status, "body:", body_text)
+            print("Discord webhook HTTP", status, "body:", text)
             return False
+
     except Exception as e:
         print("Failed to send Discord message:", e)
         return False
