@@ -1,33 +1,46 @@
 import urequests as requests
-import ujson
+try:
+    import ujson as json
+except Exception:
+    import json
+
 from secrets import secrets
 
 def send_discord_message(message, username="Auto Garden Bot"):
-    response = None
+    resp = None
     try:
-        data = {
-            "content": message,
-            "username": username
+        payload = {"content": message, "username": username}
+        body = json.dumps(payload)
+        if isinstance(body, str):
+            body = body.encode("utf-8")
+        headers = {
+            "Content-Type": "application/json",
+            "Content-Length": str(len(body))
         }
-        headers = {"Content-Type": "application/json"}
-        response = requests.post(
-            secrets['discord_webhook_url'],
-            data=ujson.dumps(data),
-            headers=headers
-        )
-        status = getattr(response, "status", getattr(response, "status_code", None))
+        resp = requests.post(secrets['discord_webhook_url'], data=body, headers=headers)
+
+        status = getattr(resp, "status", getattr(resp, "status_code", None))
+        body_text = ""
+        try:
+            body_text = resp.text
+        except Exception:
+            try:
+                body_text = resp.content
+            except Exception:
+                body_text = ""
+
         if status and 200 <= status < 300:
-            print(f"Discord message sent successfully, code {status}")
+            print("Discord message sent")
             return True
         else:
-            print(f"Discord webhook error: HTTP {status}, body: {getattr(response, 'text', '')}")
+            print("Discord webhook HTTP", status, "body:", body_text)
             return False
     except Exception as e:
-        print(f"Failed to send Discord message: {str(e)}")
+        print("Failed to send Discord message:", e)
         return False
     finally:
-        if response:
+        if resp:
             try:
-                response.close()
+                resp.close()
             except:
                 pass
