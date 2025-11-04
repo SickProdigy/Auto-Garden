@@ -1,30 +1,38 @@
 import urequests as requests
-try:
-    import ujson as json
-except Exception:
-    import json
-
 from secrets import secrets
+
+def _escape_json_str(s: str) -> str:
+    # minimal JSON string escaper for quotes/backslashes and control chars
+    s = s.replace("\\", "\\\\")
+    s = s.replace('"', '\\"')
+    s = s.replace("\n", "\\n")
+    s = s.replace("\r", "\\r")
+    s = s.replace("\t", "\\t")
+    return s
 
 def send_discord_message(message, username="Auto Garden Bot"):
     resp = None
     url = secrets.get('discord_webhook_url')
     try:
-        payload = {"content": message, "username": username}
-        body = json.dumps(payload)
-        if isinstance(body, str):
-            body = body.encode("utf-8")
-        headers = {
-            "Content-Type": "application/json",
-            "Content-Length": str(len(body))
-        }
+        if not url:
+            print("DEBUG: no webhook URL in secrets")
+            return False
 
-        # DEBUG: print exact values being sent
+        url = url.strip().strip('\'"')
+
+        # build JSON by hand so emoji (and other unicode) are preserved as UTF-8 bytes
+        content = _escape_json_str(message)
+        user = _escape_json_str(username)
+        body_bytes = ('{"content":"%s","username":"%s"}' % (content, user)).encode("utf-8")
+
+        headers = {"Content-Type": "application/json; charset=utf-8"}
+
+        # DEBUG
         print("DEBUG: webhook url repr:", repr(url))
-        print("DEBUG: body (bytes):", body)
+        print("DEBUG: body (bytes):", body_bytes)
         print("DEBUG: headers:", headers)
 
-        resp = requests.post(url, data=body, headers=headers)
+        resp = requests.post(url, data=body_bytes, headers=headers)
 
         status = getattr(resp, "status", getattr(resp, "status_code", None))
         text = ""
