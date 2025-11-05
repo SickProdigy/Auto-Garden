@@ -98,9 +98,5 @@ def connect_wifi(led=None, max_retries=3, timeout=20):
             time.sleep(0.2)
     
     print('Connected to WiFi successfully!')
-    
-    # Print connection details
-    ifconfig = wlan.ifconfig()
-    print(f"IP: {ifconfig[0]} | Gateway: {ifconfig[2]}")
-    
+
     return wlan
