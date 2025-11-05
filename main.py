@@ -1,6 +1,8 @@
 from machine import Pin
-from scripts.networking import connect_wifi, monitor_connection
+import time
+from scripts.networking import connect_wifi
 from scripts.discord_webhook import send_discord_message
+from scripts.monitors import TemperatureMonitor, WiFiMonitor, run_monitors
 
 # Initialize pins (LED light onboard)
 led = Pin("LED", Pin.OUT)
@@ -13,9 +15,16 @@ wifi = connect_wifi(led)
 if wifi and wifi.isconnected():
     send_discord_message("Pico W online and connected ✅")
 
-# Define reconnect callback
-def on_wifi_restored():
-    send_discord_message("WiFi connection restored 🔄")
+# Set up monitors
+monitors = [
+    WiFiMonitor(wifi, led, interval=5, reconnect_cooldown=60),
+    TemperatureMonitor(pin=10, interval=300, alert_high=85.0, alert_low=32.0),
+    # Add more monitors here later:
+    # SoilMoistureMonitor(pin=26, interval=600),
+    # LightLevelMonitor(pin=27, interval=900),
+]
 
-# Start connection monitoring loop (never returns)
-monitor_connection(wifi, led, on_reconnect=on_wifi_restored)
+# Main monitoring loop
+while True:
+    run_monitors(monitors)
+    time.sleep(0.1)
