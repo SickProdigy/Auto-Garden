@@ -28,8 +28,18 @@ from scripts.web_server import TempWebServer
 # Connect to WiFi
 wifi = connect_wifi(led)
 
-# Print WiFi details
+# Set static IP and print WiFi details
 if wifi and wifi.isconnected():
+    # Configure static IP
+    static_ip = '192.168.86.43'      # Your desired static IP
+    subnet = '255.255.255.0'         # Subnet mask (usually this)
+    gateway = '192.168.86.1'          # Your router's IP
+    dns = '192.168.86.1'              # DNS server (usually same as gateway)
+    
+    wifi.ifconfig((static_ip, subnet, gateway, dns))
+    time.sleep(1)
+    
+    # Print WiFi details
     ifconfig = wifi.ifconfig()
     print("\n" + "="*50)
     print("WiFi Connected Successfully!")
@@ -41,8 +51,8 @@ if wifi and wifi.isconnected():
     print(f"Web Interface:  http://{ifconfig[0]}")
     print("="*50 + "\n")
     
-    # Send startup message
-    send_discord_message("Pico W online and connected ✅")
+    # Send startup message with IP
+    send_discord_message(f"Pico W online at http://{ifconfig[0]} ✅")
 else:
     print("\n" + "="*50)
     print("WiFi Connection Failed!")
