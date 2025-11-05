@@ -15,7 +15,7 @@ def send_discord_message(message, username="Auto Garden Bot"):
     url = secrets.get('discord_webhook_url')
     try:
         if not url:
-            print("DEBUG: no webhook URL in secrets")
+            print("Error: no webhook URL in secrets")
             return False
 
         url = url.strip().strip('\'"')
@@ -27,31 +27,15 @@ def send_discord_message(message, username="Auto Garden Bot"):
 
         headers = {"Content-Type": "application/json; charset=utf-8"}
 
-        # DEBUG
-        print("DEBUG: webhook url repr:", repr(url))
-        print("DEBUG: body (bytes):", body_bytes)
-        print("DEBUG: headers:", headers)
-
         resp = requests.post(url, data=body_bytes, headers=headers)
 
         status = getattr(resp, "status", getattr(resp, "status_code", None))
-        text = ""
-        try:
-            text = resp.text
-        except:
-            try:
-                text = resp.content
-            except:
-                text = "<no body>"
-
-        print("DEBUG: resp status:", status)
-        print("DEBUG: resp body:", text)
 
         if status and 200 <= status < 300:
             print("Discord message sent")
             return True
         else:
-            print("Discord webhook HTTP", status, "body:", text)
+            print(f"Discord webhook failed with status {status}")
             return False
 
     except Exception as e:
