@@ -28,8 +28,8 @@ class TemperatureMonitor(Monitor):
     def __init__(self, pin=10, interval=300, alert_high=None, alert_low=None):
         super().__init__(interval)
         self.sensor = TemperatureSensor(pin=pin)
-        self.alert_high = alert_high  # Alert if temp goes above this
-        self.alert_low = alert_low    # Alert if temp goes below this
+        self.alert_high = alert_high
+        self.alert_low = alert_low
     
     def run(self):
         """Read all sensors and report temperatures."""
@@ -38,7 +38,6 @@ class TemperatureMonitor(Monitor):
             print("No temperature readings available")
             return
         
-        # Format message
         temp_msg = "🌡️ Temperature readings:\n"
         alerts = []
         
@@ -46,16 +45,13 @@ class TemperatureMonitor(Monitor):
             sensor_id = rom.hex()[:8]
             temp_msg += f"Sensor {sensor_id}: {temp:.1f}°F\n"
             
-            # Check alerts
             if self.alert_high and temp > self.alert_high:
                 alerts.append(f"⚠️ Sensor {sensor_id} HIGH: {temp:.1f}°F (threshold: {self.alert_high}°F)")
             if self.alert_low and temp < self.alert_low:
                 alerts.append(f"⚠️ Sensor {sensor_id} LOW: {temp:.1f}°F (threshold: {self.alert_low}°F)")
         
-        # Send regular update
         send_discord_message(temp_msg.strip())
         
-        # Send alerts separately
         for alert in alerts:
             send_discord_message(alert)
 
