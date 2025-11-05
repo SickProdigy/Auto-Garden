@@ -142,4 +142,20 @@ class WiFiMonitor(Monitor):
             self.led.on()
             time.sleep(1)
             self.led.off()
-        
+            
+            # Notify if connection was just restored
+            if not self.was_connected:
+                send_discord_message("WiFi connection restored 🔄")
+                self.was_connected = True
+
+def run_monitors(monitors):
+    """
+    Run all monitors in the list, checking if each should run based on interval.
+    Call this in your main loop.
+    """
+    for monitor in monitors:
+        if monitor.should_run():
+            try:
+                monitor.run()
+            except Exception as e:
+                print(f"Error running monitor {monitor.__class__.__name__}: {e}")
