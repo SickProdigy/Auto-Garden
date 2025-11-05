@@ -34,9 +34,9 @@ class TempWebServer:
             response = self._get_status_page(sensors, ac_monitor, heater_monitor)
             
             conn.send('HTTP/1.1 200 OK\r\n')
-            conn.send('Content-Type: text/html\r\n')
+            conn.send('Content-Type: text/html; charset=utf-8\r\n')
             conn.send('Connection: close\r\n\r\n')
-            conn.sendall(response)
+            conn.sendall(response.encode('utf-8'))
             conn.close()
         except OSError:
             pass  # No connection, continue
@@ -64,102 +64,165 @@ class TempWebServer:
         <!DOCTYPE html>
         <html>
         <head>
-            <title>Auto Garden Status</title>
+            <title>🌱 Auto Garden</title>
             <meta name="viewport" content="width=device-width, initial-scale=1">
             <meta http-equiv="refresh" content="10">
+            <meta charset="utf-8">
             <style>
+                * {{
+                    margin: 0;
+                    padding: 0;
+                    box-sizing: border-box;
+                }}
                 body {{
-                    font-family: Arial, sans-serif;
-                    max-width: 800px;
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    max-width: 900px;
                     margin: 0 auto;
                     padding: 20px;
-                    background-color: #f5f5f5;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    min-height: 100vh;
                 }}
                 h1 {{
-                    color: #2c3e50;
+                    color: white;
                     text-align: center;
+                    font-size: 36px;
+                    margin-bottom: 30px;
+                    text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
                 }}
                 .card {{
                     background: white;
-                    border-radius: 8px;
-                    padding: 20px;
-                    margin: 10px 0;
-                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                    border-radius: 15px;
+                    padding: 25px;
+                    margin: 15px 0;
+                    box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+                    transition: transform 0.2s;
+                }}
+                .card:hover {{
+                    transform: translateY(-5px);
+                }}
+                .temp-card {{
+                    position: relative;
+                    overflow: hidden;
+                }}
+                .temp-icon {{
+                    font-size: 64px;
+                    text-align: center;
+                    margin-bottom: 15px;
                 }}
                 .temp-display {{
-                    font-size: 48px;
+                    font-size: 56px;
                     font-weight: bold;
                     text-align: center;
-                    margin: 20px 0;
+                    margin: 15px 0;
+                    font-family: 'Courier New', monospace;
                 }}
-                .inside {{ color: #e74c3c; }}
-                .outside {{ color: #3498db; }}
+                .inside {{ 
+                    color: #e74c3c;
+                    text-shadow: 2px 2px 4px rgba(231, 76, 60, 0.3);
+                }}
+                .outside {{ 
+                    color: #3498db;
+                    text-shadow: 2px 2px 4px rgba(52, 152, 219, 0.3);
+                }}
                 .label {{
-                    font-size: 18px;
-                    color: #7f8c8d;
+                    font-size: 20px;
+                    color: #34495e;
                     text-align: center;
                     margin-bottom: 10px;
+                    font-weight: 600;
+                    text-transform: uppercase;
+                    letter-spacing: 1px;
                 }}
                 .status {{
                     display: flex;
                     justify-content: space-around;
                     margin-top: 20px;
+                    flex-wrap: wrap;
+                    gap: 20px;
                 }}
                 .status-item {{
                     text-align: center;
+                    flex: 1;
+                    min-width: 200px;
+                }}
+                .status-icon {{
+                    font-size: 48px;
+                    margin-bottom: 10px;
                 }}
                 .status-indicator {{
-                    font-size: 24px;
+                    font-size: 22px;
                     font-weight: bold;
-                    padding: 10px 20px;
-                    border-radius: 5px;
+                    padding: 15px 30px;
+                    border-radius: 25px;
                     display: inline-block;
                     margin-top: 10px;
+                    text-transform: uppercase;
+                    letter-spacing: 2px;
+                    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+                    transition: all 0.3s;
+                }}
+                .status-indicator:hover {{
+                    transform: scale(1.05);
                 }}
                 .on {{
-                    background-color: #2ecc71;
+                    background: linear-gradient(135deg, #2ecc71, #27ae60);
                     color: white;
+                    animation: pulse 2s infinite;
                 }}
                 .off {{
-                    background-color: #95a5a6;
+                    background: linear-gradient(135deg, #95a5a6, #7f8c8d);
                     color: white;
+                }}
+                @keyframes pulse {{
+                    0%, 100% {{ opacity: 1; }}
+                    50% {{ opacity: 0.8; }}
                 }}
                 .footer {{
                     text-align: center;
-                    color: #7f8c8d;
-                    margin-top: 20px;
+                    color: white;
+                    margin-top: 30px;
                     font-size: 14px;
+                    text-shadow: 1px 1px 2px rgba(0,0,0,0.2);
                 }}
                 .targets {{
-                    font-size: 14px;
+                    font-size: 15px;
                     color: #7f8c8d;
                     text-align: center;
-                    margin-top: 10px;
+                    margin-top: 12px;
+                    font-weight: 500;
+                }}
+                .degree {{
+                    font-size: 0.6em;
+                    vertical-align: super;
                 }}
             </style>
         </head>
         <body>
-            <h1>🌱 Auto Garden Status</h1>
+            <h1>🌱 Auto Garden Dashboard</h1>
             
-            <div class="card">
-                <div class="label">Inside Temperature</div>
-                <div class="temp-display inside">{inside_temp}°F</div>
+            <div class="card temp-card">
+                <div class="temp-icon">🏠</div>
+                <div class="label">Indoor Climate</div>
+                <div class="temp-display inside">{inside_temp}<span class="degree">°F</span></div>
             </div>
             
-            <div class="card">
-                <div class="label">Outside Temperature</div>
-                <div class="temp-display outside">{outside_temp}°F</div>
+            <div class="card temp-card">
+                <div class="temp-icon">🌤️</div>
+                <div class="label">Outdoor Climate</div>
+                <div class="temp-display outside">{outside_temp}<span class="degree">°F</span></div>
             </div>
             
             <div class="card">
                 <div class="status">
                     <div class="status-item">
-                        <div class="label">❄️ Air Conditioning</div>
+                        <div class="status-icon">❄️</div>
+                        <div class="label">Air Conditioning</div>
                         <div class="status-indicator {ac_class}">{ac_status}</div>
                         <div class="targets">Target: {ac_target}°F ± {ac_swing}°F</div>
                     </div>
                     <div class="status-item">
-                        <div class="label">🔥 Heater</div>
+                        <div class="status-icon">🔥</div>
+                        <div class="label">Heating System</div>
                         <div class="status-indicator {heater_class}">{heater_status}</div>
                         <div class="targets">Target: {heater_target}°F ± {heater_swing}°F</div>
                     </div>
@@ -167,8 +230,8 @@ class TempWebServer:
             </div>
             
             <div class="footer">
-                Last updated: {time}<br>
-                Auto-refresh every 10 seconds
+                ⏰ Last updated: {time}<br>
+                🔄 Auto-refresh every 10 seconds
             </div>
         </body>
         </html>
