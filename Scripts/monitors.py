@@ -25,45 +25,72 @@ class Monitor:
 
 class TemperatureMonitor(Monitor):
     """Monitor temperature sensors and report to Discord."""
-    def __init__(self, sensor, label="Temp", interval=300, alert_high=None, alert_low=None, log_file=None, send_alerts_to_separate_channel=False):
-        super().__init__(interval)
+    def __init__(self, sensor, label="Temp", check_interval=10, report_interval=30, alert_high=None, alert_low=None, log_file=None, send_alerts_to_separate_channel=False):
+        super().__init__(check_interval)  # Check interval for temp reading
         self.sensor = sensor
-        self.label = label  # e.g., "Inside" or "Outside"
+        self.label = label
+        self.check_interval = check_interval
+        self.report_interval = report_interval
         self.alert_high = alert_high
         self.alert_low = alert_low
         self.log_file = log_file
         self.send_alerts_to_separate_channel = send_alerts_to_separate_channel
+        self.last_report_ms = 0
+        self.last_alert_state = None  # Track if we were in alert state
     
     def run(self):
-        """Read all sensors and report temperatures."""
+        """Read sensors every check_interval, report/log every report_interval."""
         temps = self.sensor.read_all_temps(unit='F')
         if not temps:
             # print(f"No temperature readings available for {self.label}")
             return
         
+        now = time.ticks_ms()
+        should_report = time.ticks_diff(now, self.last_report_ms) >= (self.report_interval * 1000)
+        
         for rom, temp in temps.items():
             sensor_id = rom.hex()[:8]
             
-            # Build message with alert on same line if present
-            temp_msg = f"🌡️ {self.label} Temperature: {temp:.1f}°F"
+            # Check if in alert state
             has_alert = False
+            alert_type = None
             
             if self.alert_high and temp > self.alert_high:
-                temp_msg += f" ⚠️ HIGH (threshold: {self.alert_high}°F)"
                 has_alert = True
+                alert_type = "HIGH"
             elif self.alert_low and temp < self.alert_low:
-                temp_msg += f" ⚠️ LOW (threshold: {self.alert_low}°F)"
                 has_alert = True
+                alert_type = "LOW"
             
-            # Send to alert channel if out of range and configured to do so
-            if has_alert and self.send_alerts_to_separate_channel:
-                send_discord_message(temp_msg, is_alert=True)
-            else:
+            # Send alert immediately if entering alert state or if alert persists
+            if has_alert:
+                alert_msg = f"🚨 {self.label} Temperature: {temp:.1f}°F ⚠️ {alert_type} (threshold: {self.alert_high if alert_type == 'HIGH' else self.alert_low}°F)"
+                
+                if self.send_alerts_to_separate_channel:
+                    send_discord_message(alert_msg, is_alert=True)
+                else:
+                    send_discord_message(alert_msg, is_alert=False)
+                
+                self.last_alert_state = True
+            
+            # Send normal report at report_interval
+            elif should_report:
+                temp_msg = f"🌡️ {self.label} Temperature: {temp:.1f}°F"
                 send_discord_message(temp_msg, is_alert=False)
+                
+                # Reset alert state if we were in alert and now normal
+                if self.last_alert_state:
+                    recovery_msg = f"✅ {self.label} Temperature back to normal: {temp:.1f}°F"
+                    send_discord_message(recovery_msg, is_alert=False)
+                    self.last_alert_state = False
             
-            # Log to file if enabled
-            if self.log_file:
+            # Log to file at report_interval
+            if should_report and self.log_file:
                 self._log_temp(sensor_id, temp)
+        
+        # Update last report time
+        if should_report:
+            self.last_report_ms = now
     
     def _log_temp(self, sensor_id, temp):
         """Log temperature reading to file."""
