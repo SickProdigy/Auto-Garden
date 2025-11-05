@@ -19,7 +19,11 @@ if wifi and wifi.isconnected():
 
 # Get configured sensors
 sensors = get_configured_sensors() # returns a dict, e.g. {'inside': ..., 'outside': ...}
-ac_controller = ACController(relay_pin=15)
+ac_controller = ACController(
+    relay_pin=15,
+    min_run_time=30,
+    min_off_time=5
+    )
 
 ac_monitor = ACMonitor(
     ac_controller=ac_controller,
