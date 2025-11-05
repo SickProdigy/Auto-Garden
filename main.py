@@ -29,13 +29,14 @@ ac_monitor = ACMonitor(
     ac_controller=ac_controller,
     temp_sensor=sensors['inside'],  # <-- This is your inside temperature sensor
     target_temp=75.0,
-    temp_swing=2.0,
+    temp_swing=1.0,
     interval=30
 )
 
 # Set up monitors
 monitors = [
     WiFiMonitor(wifi, led, interval=5, reconnect_cooldown=60),
+    ac_monitor,
 ]
 
 # Add temperature monitors from config
