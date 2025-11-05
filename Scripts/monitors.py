@@ -142,6 +142,52 @@ class ACMonitor(Monitor):
         
         # Else: within temp_swing range, maintain current state
 
+class HeaterMonitor(Monitor):
+    """Monitor temperature and control heater automatically."""
+    def __init__(self, heater_controller, temp_sensor, target_temp=70.0, temp_swing=2.0, interval=30):
+        """
+        heater_controller: HeaterController instance
+        temp_sensor: TemperatureSensor instance (inside temp)
+        target_temp: Target temperature in °F
+        temp_swing: Temperature swing allowed (prevents rapid cycling)
+        interval: Seconds between checks
+        """
+        super().__init__(interval)
+        self.heater = heater_controller
+        self.sensor = temp_sensor
+        self.target_temp = target_temp
+        self.temp_swing = temp_swing
+        self.last_notified_state = None
+    
+    def run(self):
+        """Check temperature and control heater."""
+        temps = self.sensor.read_all_temps(unit='F')
+        if not temps:
+            return
+        
+        # Use first sensor reading (assuming single inside sensor)
+        current_temp = list(temps.values())[0]
+        
+        # Heating logic with temperature swing
+        # Turn ON if: temp < target - temp_swing
+        # Turn OFF if: temp > target + temp_swing
+        
+        if current_temp < (self.target_temp - self.temp_swing):
+            # Too cold, turn heater on
+            if self.heater.turn_on():
+                if not self.last_notified_state:
+                    send_discord_message(f"🔥 Heater turned ON - Current: {current_temp:.1f}°F, Target: {self.target_temp:.1f}°F")
+                    self.last_notified_state = True
+        
+        elif current_temp > (self.target_temp + self.temp_swing):
+            # Warm enough, turn heater off
+            if self.heater.turn_off():
+                if self.last_notified_state:
+                    send_discord_message(f"✅ Heater turned OFF - Current: {current_temp:.1f}°F, Target: {self.target_temp:.1f}°F")
+                    self.last_notified_state = False
+        
+        # Else: within temp_swing range, maintain current state
+
 class WiFiMonitor(Monitor):
     """Monitor WiFi connection and handle reconnection."""
     def __init__(self, wifi, led, interval=5, reconnect_cooldown=60):
