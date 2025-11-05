@@ -35,7 +35,8 @@ for key, sensor in sensors.items():
         TemperatureMonitor(
             sensor=sensor,
             label=config['label'],
-            interval=300,  # 5 minutes
+            check_interval=10,      # Check temp every 10 seconds
+            report_interval=30,     # Report/log every 30 seconds
             alert_high=config['alert_high'],
             alert_low=config['alert_low'],
             log_file="/temp_logs.csv",
