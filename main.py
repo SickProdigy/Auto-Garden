@@ -1,22 +1,56 @@
 from machine import Pin
 import time
-from scripts.networking import connect_wifi
-from scripts.discord_webhook import send_discord_message
-from scripts.monitors import TemperatureMonitor, WiFiMonitor, ACMonitor, HeaterMonitor, run_monitors
-from scripts.temperature_sensor import TemperatureSensor  # Removed get_configured_sensors
-from scripts.air_conditioning import ACController
-from scripts.heating import HeaterController
+import network
 
 # Initialize pins (LED light onboard)
 led = Pin("LED", Pin.OUT)
 led.low()
 
+# Hard reset WiFi interface before connecting
+print("Initializing WiFi...")
+try:
+    wlan = network.WLAN(network.STA_IF)
+    wlan.deinit()
+    time.sleep(2)
+    print("WiFi interface reset complete")
+except Exception as e:
+    print(f"WiFi reset warning: {e}")
+
+# Import after WiFi reset
+from scripts.networking import connect_wifi
+from scripts.discord_webhook import send_discord_message
+from scripts.monitors import TemperatureMonitor, WiFiMonitor, ACMonitor, HeaterMonitor, run_monitors
+from scripts.temperature_sensor import TemperatureSensor
+from scripts.air_conditioning import ACController
+from scripts.heating import HeaterController
+from scripts.web_server import TempWebServer
+
 # Connect to WiFi
 wifi = connect_wifi(led)
 
-# Send startup message if connected
+# Print WiFi details
 if wifi and wifi.isconnected():
+    ifconfig = wifi.ifconfig()
+    print("\n" + "="*50)
+    print("WiFi Connected Successfully!")
+    print("="*50)
+    print(f"IP Address:     {ifconfig[0]}")
+    print(f"Subnet Mask:    {ifconfig[1]}")
+    print(f"Gateway:        {ifconfig[2]}")
+    print(f"DNS Server:     {ifconfig[3]}")
+    print(f"Web Interface:  http://{ifconfig[0]}")
+    print("="*50 + "\n")
+    
+    # Send startup message
     send_discord_message("Pico W online and connected ✅")
+else:
+    print("\n" + "="*50)
+    print("WiFi Connection Failed!")
+    print("="*50 + "\n")
+
+# Start web server
+web_server = TempWebServer(port=80)
+web_server.start()
 
 # Sensor configuration registry (moved from temperature_sensor.py)
 SENSOR_CONFIG = {
@@ -33,8 +67,9 @@ SENSOR_CONFIG = {
         'alert_low': 68.0
     }
 }
+
 # Initialize sensors based on configuration
-def get_configured_sensors():  # define the function here
+def get_configured_sensors():
     """Return dictionary of configured sensor instances."""
     sensors = {}
     for key, config in SENSOR_CONFIG.items():
@@ -42,28 +77,28 @@ def get_configured_sensors():  # define the function here
     return sensors
 
 # Get configured sensors
-sensors = get_configured_sensors()  # Call the function here
+sensors = get_configured_sensors()
 
 # AC Controller options
 ac_controller = ACController(
     relay_pin=15,
     min_run_time=30,   # min run time in seconds
     min_off_time=5     # min off time in seconds
-    )
+)
 
 ac_monitor = ACMonitor(
     ac_controller=ac_controller,
-    temp_sensor=sensors['inside'],  # <-- This is your inside temperature sensor
+    temp_sensor=sensors['inside'],
     target_temp=77.0,   # target temperature in Fahrenheit
-    temp_swing=1.0,      # temp swing target_temp-temp_swing to target_temp+temp_swing
+    temp_swing=1.0,     # temp swing target_temp-temp_swing to target_temp+temp_swing
     interval=30         # check temp every x seconds
 )
 
 # Heater Controller options
 heater_controller = HeaterController(
     relay_pin=16,
-    min_run_time=30,   # min run time in seconds (5 minutes)
-    min_off_time=5    # min off time in seconds (3 minutes)
+    min_run_time=30,   # min run time in seconds
+    min_off_time=5     # min off time in seconds
 )
 
 heater_monitor = HeaterMonitor(
@@ -101,7 +136,11 @@ monitors = [
     ),
 ]
 
+print("Starting monitoring loop...")
+print("Press Ctrl+C to stop\n")
+
 # Main monitoring loop
 while True:
     run_monitors(monitors)
+    web_server.check_requests(sensors, ac_monitor, heater_monitor)
     time.sleep(0.1)
