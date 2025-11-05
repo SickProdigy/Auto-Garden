@@ -2,8 +2,9 @@ from machine import Pin
 import time
 from scripts.networking import connect_wifi
 from scripts.discord_webhook import send_discord_message
-from scripts.monitors import TemperatureMonitor, WiFiMonitor, run_monitors
+from scripts.monitors import TemperatureMonitor, WiFiMonitor, ACMonitor, run_monitors
 from scripts.temperature_sensor import get_configured_sensors, SENSOR_CONFIG
+from scripts.air_conditioning import ACController
 
 # Initialize pins (LED light onboard)
 led = Pin("LED", Pin.OUT)
@@ -17,7 +18,16 @@ if wifi and wifi.isconnected():
     send_discord_message("Pico W online and connected ✅")
 
 # Get configured sensors
-sensors = get_configured_sensors()
+sensors = get_configured_sensors() # returns a dict, e.g. {'inside': ..., 'outside': ...}
+ac_controller = ACController(relay_pin=15)
+
+ac_monitor = ACMonitor(
+    ac_controller=ac_controller,
+    temp_sensor=sensors['inside'],  # <-- This is your inside temperature sensor
+    target_temp=75.0,
+    temp_swing=2.0,
+    interval=30
+)
 
 # Set up monitors
 monitors = [
