@@ -25,35 +25,53 @@ class Monitor:
 
 class TemperatureMonitor(Monitor):
     """Monitor temperature sensors and report to Discord."""
-    def __init__(self, pin=10, interval=300, alert_high=None, alert_low=None):
+    def __init__(self, sensor, label="Temp", interval=300, alert_high=None, alert_low=None, log_file=None):
         super().__init__(interval)
-        self.sensor = TemperatureSensor(pin=pin)
+        self.sensor = sensor
+        self.label = label  # e.g., "Inside" or "Outside"
         self.alert_high = alert_high
         self.alert_low = alert_low
+        self.log_file = log_file
     
     def run(self):
         """Read all sensors and report temperatures."""
         temps = self.sensor.read_all_temps(unit='F')
         if not temps:
-            print("No temperature readings available")
+            print(f"No temperature readings available for {self.label}")
             return
         
-        temp_msg = "🌡️ Temperature readings:\n"
+        temp_msg = f"🌡️ {self.label} Temperature:\n"
         alerts = []
         
         for rom, temp in temps.items():
             sensor_id = rom.hex()[:8]
-            temp_msg += f"Sensor {sensor_id}: {temp:.1f}°F\n"
+            temp_msg += f"{temp:.1f}°F\n"
+            
+            # Log to file if enabled
+            if self.log_file:
+                self._log_temp(sensor_id, temp)
             
             if self.alert_high and temp > self.alert_high:
-                alerts.append(f"⚠️ Sensor {sensor_id} HIGH: {temp:.1f}°F (threshold: {self.alert_high}°F)")
+                alerts.append(f"⚠️ {self.label} HIGH: {temp:.1f}°F (threshold: {self.alert_high}°F)")
             if self.alert_low and temp < self.alert_low:
-                alerts.append(f"⚠️ Sensor {sensor_id} LOW: {temp:.1f}°F (threshold: {self.alert_low}°F)")
+                alerts.append(f"⚠️ {self.label} LOW: {temp:.1f}°F (threshold: {self.alert_low}°F)")
         
         send_discord_message(temp_msg.strip())
         
         for alert in alerts:
             send_discord_message(alert)
+    
+    def _log_temp(self, sensor_id, temp):
+        """Log temperature reading to file."""
+        try:
+            import time
+            timestamp = time.localtime()
+            log_entry = f"{timestamp[0]}-{timestamp[1]:02d}-{timestamp[2]:02d} {timestamp[3]:02d}:{timestamp[4]:02d}:{timestamp[5]:02d},{self.label},{sensor_id},{temp:.2f}\n"
+            
+            with open(self.log_file, 'a') as f:
+                f.write(log_entry)
+        except Exception as e:
+            print(f"Error logging temperature: {e}")
 
 class WiFiMonitor(Monitor):
     """Monitor WiFi connection and handle reconnection."""
