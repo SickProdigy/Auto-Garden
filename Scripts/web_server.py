@@ -97,6 +97,29 @@ class TempWebServer:
             # Load current config
             config = self._load_config()
             
+            # Check if this is a "Resume Schedule" request
+            if params.get('resume_schedule') == 'true':
+                config['schedule_enabled'] = True
+                
+                # Save to file
+                if self._save_config_to_file(config):
+                    print("▶️ Schedule resumed")
+                    
+                    # Reload schedule monitor
+                    if schedule_monitor:
+                        schedule_monitor.reload_config(config)
+                
+                # Send Discord notification
+                try:
+                    from scripts.discord_webhook import send_discord_message
+                    message = "▶️ Schedule resumed - Automatic temperature control active"
+                    send_discord_message(message)
+                except:
+                    pass
+                
+                return self._get_status_page(sensors, ac_monitor, heater_monitor, show_success=True)
+            
+            # Otherwise, handle normal schedule update
             # Update schedule enabled status
             config['schedule_enabled'] = params.get('schedule_enabled') == 'on'
             
@@ -144,7 +167,7 @@ class TempWebServer:
             sys.print_exception(e)
         
         return self._get_status_page(sensors, ac_monitor, heater_monitor, show_success=True)
-    
+
     def _handle_update(self, request, sensors, ac_monitor, heater_monitor, schedule_monitor):
         """Handle form submission and update settings."""
         try:
@@ -637,8 +660,26 @@ class TempWebServer:
         
         enabled_checked = 'checked' if config.get('schedule_enabled') else ''
         
-        form = """
-        <form method="POST" action="/schedule" class="controls" style="margin-top: 20px;">
+        # Check if in HOLD mode
+        is_hold_mode = not config.get('schedule_enabled', False) and len(config.get('schedules', [])) > 0
+        
+        # Build header with toggle or resume button
+        if is_hold_mode:
+            # Show Resume Schedule button instead of toggle
+            header = """
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h3 style="color: #34495e; margin: 0;">⚙️ Edit Schedules</h3>
+                <form method="POST" action="/schedule" style="margin: 0;">
+                    <input type="hidden" name="resume_schedule" value="true">
+                    <button type="submit" style="padding: 10px 20px; background: linear-gradient(135deg, #2ecc71, #27ae60); color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.2); transition: transform 0.2s;">
+                        ▶️ Resume Schedule
+                    </button>
+                </form>
+            </div>
+            """
+        else:
+            # Show toggle switch for enable/disable
+            header = """
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                 <h3 style="color: #34495e; margin: 0;">⚙️ Edit Schedules</h3>
                 <label class="toggle-switch">
@@ -646,7 +687,12 @@ class TempWebServer:
                     <span class="slider"></span>
                 </label>
             </div>
-        """.format(enabled_checked=enabled_checked)
+            """.format(enabled_checked=enabled_checked)
+        
+        form = """
+        <form method="POST" action="/schedule" class="controls" style="margin-top: 20px;">
+            {header}
+        """.format(header=header)
         
         for i, schedule in enumerate(schedules[:4]):
             form += """
