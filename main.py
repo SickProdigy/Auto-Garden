@@ -77,6 +77,14 @@ if wifi and wifi.isconnected():
     
     # Send startup message with IP
     send_discord_message(f"Pico W online at http://{ifconfig[0]} ✅")
+    
+    # Sync time with NTP
+    try:
+        import ntptime
+        ntptime.settime()
+        print("Time synced with NTP server")
+    except Exception as e:
+        print("Failed to sync time: {}".format(e))
 else:
     print("\n" + "="*50)
     print("WiFi Connection Failed!")
