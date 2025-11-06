@@ -20,6 +20,14 @@ class ScheduleMonitor:
         self.last_check = 0
         self.current_schedule = None
         self.last_applied_schedule = None
+    
+    def should_run(self):
+        """Check if it's time to run this monitor."""
+        current_time = time.time()
+        if current_time - self.last_check >= self.interval:
+            self.last_check = current_time
+            return True
+        return False
         
     def _parse_time(self, time_str):
         """Convert time string 'HH:MM' to minutes since midnight."""
@@ -123,14 +131,6 @@ class ScheduleMonitor:
     
     def run(self):
         """Check if schedule needs to be updated."""
-        current_time = time.time()
-        
-        # Only check at specified interval
-        if current_time - self.last_check < self.interval:
-            return
-        
-        self.last_check = current_time
-        
         # Find and apply active schedule
         active_schedule = self._find_active_schedule()
         if active_schedule:
