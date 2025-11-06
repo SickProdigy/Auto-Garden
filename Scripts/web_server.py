@@ -241,6 +241,7 @@ class TempWebServer:
 
     def _get_status_page(self, sensors, ac_monitor, heater_monitor, show_success=False):
         """Generate HTML status page."""
+        print("DEBUG: Generating status page...")
         try:
             # Get current temperatures
             inside_temps = sensors['inside'].read_all_temps(unit='F')
@@ -320,7 +321,10 @@ class TempWebServer:
             inside_temp_str = "{:.1f}".format(inside_temp) if isinstance(inside_temp, float) else str(inside_temp)
             outside_temp_str = "{:.1f}".format(outside_temp) if isinstance(outside_temp, float) else str(outside_temp)
             
-            # **NEW: Add HOLD mode banner**
+            # ===== START: Add HOLD mode banner =====
+            # Check if in HOLD mode (schedules exist but are disabled)
+            is_hold_mode = not config.get('schedule_enabled', False) and len(config.get('schedules', [])) > 0
+            
             hold_banner = ""
             if is_hold_mode:
                 hold_banner = """
@@ -328,7 +332,7 @@ class TempWebServer:
                     ⏸️ HOLD MODE ACTIVE - Manual settings in use (Schedule paused)
                 </div>
                 """
-            
+            # ===== END: Add HOLD mode banner =====
             html = """
 <!DOCTYPE html>
 <html>
