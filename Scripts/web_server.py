@@ -184,6 +184,24 @@ class TempWebServer:
             
             config['schedules'] = schedules
             
+            # ===== START: Validate all schedules =====
+            for i, schedule in enumerate(schedules):
+                heater_temp = schedule.get('heater_target', 80.0)
+                ac_temp = schedule.get('ac_target', 77.0)
+                
+                if heater_temp > ac_temp:
+                    print("❌ Schedule validation failed: Schedule {} has heater ({}) > AC ({})".format(
+                        i+1, heater_temp, ac_temp
+                    ))
+                    return self._get_error_page(
+                        "Invalid Schedule",
+                        "Schedule {} ({}): Heater target ({:.1f}°F) cannot be greater than AC target ({:.1f}°F)".format(
+                            i+1, schedule.get('name', 'Unnamed'), heater_temp, ac_temp
+                        ),
+                        sensors, ac_monitor, heater_monitor
+                    )
+            # ===== END: Validate all schedules =====
+            
             # Save to file
             if self._save_config_to_file(config):
                 print("Schedule configuration saved")
@@ -223,6 +241,26 @@ class TempWebServer:
             
             # Load current config
             config = self._load_config()
+            
+            # ===== START: Validate Heat <= AC =====
+            # Get the values that will be set
+            new_heater_target = params.get('heater_target', config.get('heater_target', 80.0))
+            new_ac_target = params.get('ac_target', config.get('ac_target', 77.0))
+            
+            # Validation: Heater must be <= AC
+            if new_heater_target > new_ac_target:
+                print("❌ Validation failed: Heater target ({}) cannot be greater than AC target ({})".format(
+                    new_heater_target, new_ac_target
+                ))
+                # Return error page
+                return self._get_error_page(
+                    "Invalid Settings",
+                    "Heater target ({:.1f}°F) cannot be greater than AC target ({:.1f}°F)".format(
+                        new_heater_target, new_ac_target
+                    ),
+                    sensors, ac_monitor, heater_monitor
+                )
+            # ===== END: Validate Heat <= AC =====
             
             # ===== START: Update AC Settings =====
             if 'ac_target' in params and ac_monitor:
@@ -630,35 +668,26 @@ class TempWebServer:
     
     <div class="card full-width">
         <div class="status">
-            <div class="status-item">
-                <div class="status-icon">❄️</div>
-                <div class="label">Air Conditioning</div>
-                <div class="status-indicator {ac_class}">{ac_status}</div>
-                <div class="targets">Target: {ac_target}°F ± {ac_swing}°F</div>
-            </div>
+            <!-- ===== HEATER FIRST (LEFT) ===== -->
             <div class="status-item">
                 <div class="status-icon">🔥</div>
                 <div class="label">Heating System</div>
                 <div class="status-indicator {heater_class}">{heater_status}</div>
                 <div class="targets">Target: {heater_target}°F ± {heater_swing}°F</div>
             </div>
+            <!-- ===== AC SECOND (RIGHT) ===== -->
+            <div class="status-item">
+                <div class="status-icon">❄️</div>
+                <div class="label">Air Conditioning</div>
+                <div class="status-indicator {ac_class}">{ac_status}</div>
+                <div class="targets">Target: {ac_target}°F ± {ac_swing}°F</div>
+            </div>
         </div>
         
         <form method="POST" action="/update" class="controls">
             <h2 style="text-align: center; color: #34495e; margin-bottom: 20px;">⚙️ Adjust Settings</h2>
-            
             <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px;">
-                <div>
-                    <div class="control-group">
-                        <label class="control-label">❄️ AC Target (°F)</label>
-                        <input type="number" name="ac_target" value="{ac_target}" step="0.5" min="60" max="85">
-                    </div>
-                    <div class="control-group">
-                        <label class="control-label">❄️ AC Swing (°F)</label>
-                        <input type="number" name="ac_swing" value="{ac_swing}" step="0.5" min="0.5" max="5">
-                    </div>
-                </div>
-                
+                <!-- ===== LEFT COLUMN: Heater ===== -->
                 <div>
                     <div class="control-group">
                         <label class="control-label">🔥 Heater Target (°F)</label>
@@ -667,6 +696,18 @@ class TempWebServer:
                     <div class="control-group">
                         <label class="control-label">🔥 Heater Swing (°F)</label>
                         <input type="number" name="heater_swing" value="{heater_swing}" step="0.5" min="0.5" max="5">
+                    </div>
+                </div>
+                
+                <!-- ===== RIGHT COLUMN: AC ===== -->
+                <div>
+                    <div class="control-group">
+                        <label class="control-label">❄️ AC Target (°F)</label>
+                        <input type="number" name="ac_target" value="{ac_target}" step="0.5" min="60" max="85">
+                    </div>
+                    <div class="control-group">
+                        <label class="control-label">❄️ AC Swing (°F)</label>
+                        <input type="number" name="ac_swing" value="{ac_swing}" step="0.5" min="0.5" max="5">
                     </div>
                 </div>
             </div>
@@ -724,6 +765,134 @@ class TempWebServer:
             import sys
             sys.print_exception(e)
             return "<html><body><h1>Error loading page</h1><pre>{}</pre></body></html>".format(str(e))
+
+    def _get_error_page(self, error_title, error_message, sensors, ac_monitor, heater_monitor):
+        """Generate error page with message."""
+        # Get current temps
+        inside_temps = sensors['inside'].read_all_temps(unit='F')
+        outside_temps = sensors['outside'].read_all_temps(unit='F')
+        
+        inside_temp = list(inside_temps.values())[0] if inside_temps else "N/A"
+        outside_temp = list(outside_temps.values())[0] if outside_temps else "N/A"
+        
+        inside_temp_str = "{:.1f}".format(inside_temp) if isinstance(inside_temp, float) else str(inside_temp)
+        outside_temp_str = "{:.1f}".format(outside_temp) if isinstance(outside_temp, float) else str(outside_temp)
+        
+        # Get current statuses
+        ac_status = "ON" if ac_monitor and ac_monitor.ac.get_state() else "OFF"
+        heater_status = "ON" if heater_monitor and heater_monitor.heater.get_state() else "OFF"
+        
+        html = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Error - Climate Control</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body {{
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }}
+        .container {{
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }}
+        .error-banner {{
+            background: linear-gradient(135deg, #e74c3c, #c0392b);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            font-weight: bold;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }}
+        .error-title {{
+            font-size: 24px;
+            margin-bottom: 10px;
+        }}
+        .error-message {{
+            font-size: 16px;
+            line-height: 1.5;
+        }}
+        .btn {{
+            background: linear-gradient(135deg, #3498db, #2980b9);
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            text-decoration: none;
+            display: inline-block;
+            margin-top: 20px;
+        }}
+        .btn:hover {{
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(52, 152, 219, 0.4);
+        }}
+        .status-grid {{
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+            margin-top: 20px;
+        }}
+        .status-card {{
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="error-banner">
+            <div class="error-title">❌ {error_title}</div>
+            <div class="error-message">{error_message}</div>
+        </div>
+        
+        <div class="status-grid">
+            <div class="status-card">
+                <div style="font-size: 14px; color: #7f8c8d; margin-bottom: 5px;">🏠 Inside</div>
+                <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">{inside_temp}°F</div>
+            </div>
+            <div class="status-card">
+                <div style="font-size: 14px; color: #7f8c8d; margin-bottom: 5px;">🌡️ Outside</div>
+                <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">{outside_temp}°F</div>
+            </div>
+            <div class="status-card">
+                <div style="font-size: 14px; color: #7f8c8d; margin-bottom: 5px;">🔥 Heater</div>
+                <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">{heater_status}</div>
+            </div>
+            <div class="status-card">
+                <div style="font-size: 14px; color: #7f8c8d; margin-bottom: 5px;">❄️ AC</div>
+                <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">{ac_status}</div>
+            </div>
+        </div>
+        
+        <div style="text-align: center;">
+            <a href="/" class="btn">⬅️ Go Back</a>
+        </div>
+    </div>
+</body>
+</html>
+        """.format(
+            error_title=error_title,
+            error_message=error_message,
+            inside_temp=inside_temp_str,
+            outside_temp=outside_temp_str,
+            heater_status=heater_status,
+            ac_status=ac_status
+        )
+        
+        return html
     
     def _build_schedule_form(self, config):
         """Build the schedule editing form."""
