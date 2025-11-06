@@ -181,6 +181,15 @@ class TempWebServer:
                 config['heater_swing'] = params['heater_swing']
                 print("Heater swing updated to {}°F".format(params['heater_swing']))
             
+            # **NEW: Disable scheduling and enter HOLD mode**
+            if config.get('schedule_enabled'):
+                config['schedule_enabled'] = False
+                print("⏸️ Schedule disabled - entering HOLD mode")
+                
+                # Reload schedule monitor to disable it
+                if schedule_monitor:
+                    schedule_monitor.reload_config(config)
+            
             # Save settings to file
             if self._save_config_to_file(config):
                 print("Settings persisted to disk")
@@ -193,7 +202,7 @@ class TempWebServer:
                 heater_target_str = str(params.get('heater_target', 'N/A'))
                 heater_swing_str = str(params.get('heater_swing', 'N/A'))
                 
-                message = "Settings Updated - AC: {}F +/- {}F | Heater: {}F +/- {}F".format(
+                message = "⏸️ HOLD Mode - Manual override: AC: {}F +/- {}F | Heater: {}F +/- {}F (Schedule disabled)".format(
                     ac_target_str, ac_swing_str, heater_target_str, heater_swing_str
                 )
                 send_discord_message(message)
@@ -206,7 +215,7 @@ class TempWebServer:
             sys.print_exception(e)
         
         return self._get_status_page(sensors, ac_monitor, heater_monitor, show_success=True)
-    
+
     def _get_status_page(self, sensors, ac_monitor, heater_monitor, show_success=False):
         """Generate HTML status page."""
         try:
@@ -231,10 +240,22 @@ class TempWebServer:
             # Load config
             config = self._load_config()
             
+            # **NEW: Check if in HOLD mode**
+            is_hold_mode = not config.get('schedule_enabled', False) and len(config.get('schedules', [])) > 0
+            
             # Build schedule display
-            schedule_status = "ENABLED" if config.get('schedule_enabled') else "DISABLED"
-            schedule_color = "#2ecc71" if config.get('schedule_enabled') else "#95a5a6"
-            schedule_icon = "✅" if config.get('schedule_enabled') else "⚠️"
+            if is_hold_mode:
+                schedule_status = "HOLD MODE"
+                schedule_color = "#f39c12"  # Orange color for hold
+                schedule_icon = "⏸️"
+            elif config.get('schedule_enabled'):
+                schedule_status = "ENABLED"
+                schedule_color = "#2ecc71"
+                schedule_icon = "✅"
+            else:
+                schedule_status = "DISABLED"
+                schedule_color = "#95a5a6"
+                schedule_icon = "⚠️"
             
             # Build schedule cards
             schedule_cards = ""
@@ -275,6 +296,15 @@ class TempWebServer:
             # Format temperature values
             inside_temp_str = "{:.1f}".format(inside_temp) if isinstance(inside_temp, float) else str(inside_temp)
             outside_temp_str = "{:.1f}".format(outside_temp) if isinstance(outside_temp, float) else str(outside_temp)
+            
+            # **NEW: Add HOLD mode banner**
+            hold_banner = ""
+            if is_hold_mode:
+                hold_banner = """
+                <div style="background: linear-gradient(135deg, #f39c12, #e67e22); color: white; padding: 15px; border-radius: 10px; text-align: center; font-weight: bold; margin-bottom: 20px; box-shadow: 0 4px 8px rgba(0,0,0,0.2); animation: fadeIn 0.5s;">
+                    ⏸️ HOLD MODE ACTIVE - Manual settings in use (Schedule paused)
+                </div>
+                """
             
             html = """
 <!DOCTYPE html>
@@ -483,6 +513,7 @@ class TempWebServer:
 <body>
     <h1>🌱 Auto Garden Dashboard</h1>
     
+    {hold_banner}
     {success_message}
     
     <div class="temp-grid">
@@ -569,6 +600,7 @@ class TempWebServer:
 </body>
 </html>
             """.format(
+                hold_banner=hold_banner,
                 success_message=success_html,
                 inside_temp=inside_temp_str,
                 outside_temp=outside_temp_str,
