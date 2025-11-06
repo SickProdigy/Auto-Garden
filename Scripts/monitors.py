@@ -24,9 +24,24 @@ class Monitor:
         pass
 
 class TemperatureMonitor(Monitor):
-    """Monitor temperature sensors and report to Discord."""
-    def __init__(self, sensor, label="Temp", check_interval=10, report_interval=30, alert_high=None, alert_low=None, log_file=None, send_alerts_to_separate_channel=False):
-        super().__init__(check_interval)  # Check interval for temp reading
+    """Monitor for tracking temperature readings and alerts."""
+    
+    def __init__(self, sensor, label, check_interval=10, report_interval=60, 
+                 alert_high=None, alert_low=None, log_file="/temp_logs.csv",
+                 send_alerts_to_separate_channel=False):
+        """
+        Initialize temperature monitor.
+        
+        Args:
+            sensor: TemperatureSensor instance
+            label: Label for this sensor
+            check_interval: How often to check temp (seconds)
+            report_interval: How often to report/log temp (seconds)
+            alert_high: High temp threshold for alerts
+            alert_low: Low temp threshold for alerts
+            log_file: Path to CSV log file
+            send_alerts_to_separate_channel: Use separate Discord channel for alerts
+        """
         self.sensor = sensor
         self.label = label
         self.check_interval = check_interval
@@ -35,74 +50,119 @@ class TemperatureMonitor(Monitor):
         self.alert_low = alert_low
         self.log_file = log_file
         self.send_alerts_to_separate_channel = send_alerts_to_separate_channel
-        self.last_report_ms = 0
-        self.last_alert_state = None  # Track if we were in alert state
+        
+        self.last_check = 0
+        self.last_report = 0
+        self.alert_sent = False
+        self.alert_start_time = None  # Track when alert started
+    
+    def should_run(self):
+        """Check if it's time to run this monitor."""
+        current_time = time.time()
+        if current_time - self.last_check >= self.check_interval:
+            self.last_check = current_time
+            return True
+        return False
     
     def run(self):
-        """Read sensors every check_interval, report/log every report_interval."""
+        """Check temperature and handle alerts/logging."""
+        current_time = time.time()
+        
+        # Read temperature
         temps = self.sensor.read_all_temps(unit='F')
         if not temps:
-            # print(f"No temperature readings available for {self.label}")
             return
         
-        now = time.ticks_ms()
-        should_report = time.ticks_diff(now, self.last_report_ms) >= (self.report_interval * 1000)
+        temp = list(temps.values())[0]  # Get first temp reading
         
-        for rom, temp in temps.items():
-            sensor_id = rom.hex()[:8]
-            
-            # Check if in alert state
-            has_alert = False
-            alert_type = None
-            
-            if self.alert_high and temp > self.alert_high:
-                has_alert = True
-                alert_type = "HIGH"
-            elif self.alert_low and temp < self.alert_low:
-                has_alert = True
-                alert_type = "LOW"
-            
-            # Send alert immediately to alert channel (every check_interval, only if configured)
-            if has_alert and self.send_alerts_to_separate_channel:
-                alert_msg = f"🚨 {self.label} Temperature: {temp:.1f}°F ⚠️ {alert_type} (threshold: {self.alert_high if alert_type == 'HIGH' else self.alert_low}°F)"
-                send_discord_message(alert_msg, is_alert=True)
-                self.last_alert_state = True
-            
-            # Send normal report at report_interval to regular channel (regardless of alert state)
-            if should_report:
-                temp_msg = f"🌡️ {self.label} Temperature: {temp:.1f}°F"
-                
-                # Add alert indicator to regular report if in alert
-                if has_alert:
-                    temp_msg += f" ⚠️ {alert_type}"
-                
-                send_discord_message(temp_msg, is_alert=False)
-                
-                # Send recovery message if we were in alert and now normal
-                if not has_alert and self.last_alert_state:
-                    recovery_msg = f"✅ {self.label} Temperature back to normal: {temp:.1f}°F"
-                    send_discord_message(recovery_msg, is_alert=False)
-                    self.last_alert_state = False
-            
-            # Log to file at report_interval
-            if should_report and self.log_file:
-                self._log_temp(sensor_id, temp)
+        # Check for alerts
+        alert_condition = False
+        alert_message = ""
         
-        # Update last report time
-        if should_report:
-            self.last_report_ms = now
+        if self.alert_high and temp > self.alert_high:
+            alert_condition = True
+            alert_message = "⚠️ {} temperature HIGH: {:.1f}°F (threshold: {:.1f}°F)".format(
+                self.label, temp, self.alert_high
+            )
+        elif self.alert_low and temp < self.alert_low:
+            alert_condition = True
+            alert_message = "⚠️ {} temperature LOW: {:.1f}°F (threshold: {:.1f}°F)".format(
+                self.label, temp, self.alert_low
+            )
+        
+        # Handle alert state changes
+        if alert_condition and not self.alert_sent:
+            # Alert triggered
+            self.alert_start_time = current_time
+            print(alert_message)
+            
+            # Send to appropriate Discord channel
+            if self.send_alerts_to_separate_channel:
+                from scripts.discord_webhook import send_alert_message
+                send_alert_message(alert_message)
+            else:
+                from scripts.discord_webhook import send_discord_message
+                send_discord_message(alert_message)
+            
+            self.alert_sent = True
+            
+        elif not alert_condition and self.alert_sent:
+            # Alert resolved
+            duration = current_time - self.alert_start_time if self.alert_start_time else 0
+            
+            # Format duration
+            if duration >= 3600:
+                hours = int(duration / 3600)
+                minutes = int((duration % 3600) / 60)
+                duration_str = "{}h {}m".format(hours, minutes)
+            elif duration >= 60:
+                minutes = int(duration / 60)
+                seconds = int(duration % 60)
+                duration_str = "{}m {}s".format(minutes, seconds)
+            else:
+                duration_str = "{}s".format(int(duration))
+            
+            recovery_message = "✅ {} temperature back to normal: {:.1f}°F (was out of range for {})".format(
+                self.label, temp, duration_str
+            )
+            print(recovery_message)
+            
+            # Send to appropriate Discord channel
+            if self.send_alerts_to_separate_channel:
+                from scripts.discord_webhook import send_alert_message
+                send_alert_message(recovery_message)
+            else:
+                from scripts.discord_webhook import send_discord_message
+                send_discord_message(recovery_message)
+            
+            self.alert_sent = False
+            self.alert_start_time = None
+        
+        # Log temperature at report interval
+        if current_time - self.last_report >= self.report_interval:
+            self.last_report = current_time
+            self._log_temperature(temp)
     
-    def _log_temp(self, sensor_id, temp):
-        """Log temperature reading to file."""
+    def _log_temperature(self, temp):
+        """Log temperature to CSV file."""
         try:
-            import time
-            timestamp = time.localtime()
-            log_entry = f"{timestamp[0]}-{timestamp[1]:02d}-{timestamp[2]:02d} {timestamp[3]:02d}:{timestamp[4]:02d}:{timestamp[5]:02d},{self.label},{sensor_id},{temp:.2f}\n"
+            # Get sensor ID
+            sensor_ids = self.sensor.get_sensor_ids()
+            sensor_id = sensor_ids[0] if sensor_ids else "unknown"
             
+            # Get timestamp
+            t = time.localtime()
+            timestamp = "{:04d}-{:02d}-{:02d} {:02d}:{:02d}:{:02d}".format(
+                t[0], t[1], t[2], t[3], t[4], t[5]
+            )
+            
+            # Append to log file
             with open(self.log_file, 'a') as f:
-                f.write(log_entry)
+                f.write("{},{},{},{:.2f}\n".format(
+                    timestamp, self.label, sensor_id, temp
+                ))
         except Exception as e:
-            print(f"Error logging temperature: {e}")
+            print("Error logging temperature: {}".format(e))
 
 class ACMonitor(Monitor):
     def __init__(self, ac_controller, temp_sensor, target_temp=75.0, temp_swing=2.0, interval=30):
