@@ -119,7 +119,7 @@ class TempWebServer:
                     pass
                 
                 return self._get_status_page(sensors, ac_monitor, heater_monitor, show_success=True)
-            
+
             elif mode_action == 'temporary_hold':
                 # Enter temporary hold (pause schedules temporarily)
                 config['schedule_enabled'] = False
@@ -397,7 +397,7 @@ class TempWebServer:
                             🕐 {time} - {name}
                         </div>
                         <div style="color: #7f8c8d; font-size: 14px;">
-                            AC: {ac_temp}°F | Heater: {heater_temp}°F
+                            Heat: {heater_temp}°F | AC: {ac_temp}°F
                         </div>
                     </div>
                     """.format(
@@ -1003,12 +1003,12 @@ class TempWebServer:
                     <input type="text" name="schedule_{i}_name" value="{name}" placeholder="e.g. Morning">
                 </div>
                 <div class="control-group" style="margin: 0;">
-                    <label class="control-label" style="font-size: 14px;">AC (°F)</label>
-                    <input type="number" name="schedule_{i}_ac" value="{ac}" step="0.5" min="60" max="85">
-                </div>
-                <div class="control-group" style="margin: 0;">
                     <label class="control-label" style="font-size: 14px;">Heater (°F)</label>
                     <input type="number" name="schedule_{i}_heater" value="{heater}" step="0.5" min="60" max="85">
+                </div>
+                <div class="control-group" style="margin: 0;">
+                    <label class="control-label" style="font-size: 14px;">AC (°F)</label>
+                    <input type="number" name="schedule_{i}_ac" value="{ac}" step="0.5" min="60" max="85">
                 </div>
             </div>
             """.format(
