@@ -2,6 +2,7 @@ from machine import Pin
 import time
 import network
 import json
+import gc  # ADD THIS - for garbage collection
 
 # Initialize pins (LED light onboard)
 led = Pin("LED", Pin.OUT)
@@ -248,6 +249,11 @@ while True:
     # Check for incoming web requests (non-blocking)
     # Pass schedule_monitor so web interface can reload config when schedules change
     web_server.check_requests(sensors, ac_monitor, heater_monitor, schedule_monitor)
+    
+    # ===== START: Garbage Collection =====
+    # Free up unused memory to prevent fragmentation
+    gc.collect()
+    # ===== END: Garbage Collection =====
     
     # Small delay to prevent CPU overload (0.1 seconds = 10 loops per second)
     time.sleep(0.1)
