@@ -669,12 +669,9 @@ class TempWebServer:
             header = """
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                 <h3 style="color: #34495e; margin: 0;">⚙️ Edit Schedules</h3>
-                <form method="POST" action="/schedule" style="margin: 0;">
-                    <input type="hidden" name="resume_schedule" value="true">
-                    <button type="submit" style="padding: 10px 20px; background: linear-gradient(135deg, #2ecc71, #27ae60); color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.2); transition: transform 0.2s;">
-                        ▶️ Resume Schedule
-                    </button>
-                </form>
+                <button type="submit" name="resume_schedule" value="true" style="padding: 10px 20px; background: linear-gradient(135deg, #2ecc71, #27ae60); color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.2); transition: transform 0.2s;">
+                    ▶️ Resume Schedule
+                </button>
             </div>
             """
         else:
