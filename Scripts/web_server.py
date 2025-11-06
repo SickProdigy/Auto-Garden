@@ -2,7 +2,7 @@ import socket
 import time
 
 class TempWebServer:
-    """Simple web server for viewing temperatures."""
+    """Simple web server for viewing temperatures and adjusting settings."""
     def __init__(self, port=80):
         self.port = port
         self.socket = None
@@ -30,8 +30,12 @@ class TempWebServer:
             conn.settimeout(3.0)
             request = conn.recv(1024).decode('utf-8')
             
-            # Generate response
-            response = self._get_status_page(sensors, ac_monitor, heater_monitor)
+            # Check if this is a POST request (form submission)
+            if 'POST /update' in request:
+                response = self._handle_update(request, sensors, ac_monitor, heater_monitor)
+            else:
+                # Regular GET request
+                response = self._get_status_page(sensors, ac_monitor, heater_monitor)
             
             conn.send('HTTP/1.1 200 OK\r\n')
             conn.send('Content-Type: text/html; charset=utf-8\r\n')
@@ -43,7 +47,55 @@ class TempWebServer:
         except Exception as e:
             print(f"Web server error: {e}")
     
-    def _get_status_page(self, sensors, ac_monitor, heater_monitor):
+    def _handle_update(self, request, sensors, ac_monitor, heater_monitor):
+        """Handle form submission and update settings."""
+        try:
+            # Extract form data from POST body
+            body = request.split('\r\n\r\n')[1] if '\r\n\r\n' in request else ''
+            params = {}
+            
+            for pair in body.split('&'):
+                if '=' in pair:
+                    key, value = pair.split('=', 1)
+                    params[key] = float(value)
+            
+            # Update AC settings
+            if 'ac_target' in params and ac_monitor:
+                ac_monitor.target_temp = params['ac_target']
+                print(f"AC target updated to {params['ac_target']}°F")
+            
+            if 'ac_swing' in params and ac_monitor:
+                ac_monitor.temp_swing = params['ac_swing']
+                print(f"AC swing updated to {params['ac_swing']}°F")
+            
+            # Update heater settings
+            if 'heater_target' in params and heater_monitor:
+                heater_monitor.target_temp = params['heater_target']
+                print("Heater target updated to {}°F".format(params['heater_target']))
+            
+            if 'heater_swing' in params and heater_monitor:
+                heater_monitor.temp_swing = params['heater_swing']
+                print("Heater swing updated to {}°F".format(params['heater_swing']))
+            
+            # Send Discord notification
+            from scripts.discord_webhook import send_discord_message
+            ac_target_str = str(params.get('ac_target', 'N/A'))
+            ac_swing_str = str(params.get('ac_swing', 'N/A'))
+            heater_target_str = str(params.get('heater_target', 'N/A'))
+            heater_swing_str = str(params.get('heater_swing', 'N/A'))
+            
+            message = "Settings Updated - AC: {}F +/- {}F | Heater: {}F +/- {}F".format(
+                ac_target_str, ac_swing_str, heater_target_str, heater_swing_str
+            )
+            send_discord_message(message)
+            
+        except Exception as e:
+            print("Error updating settings: {}".format(e))
+        
+        # Return updated page
+        return self._get_status_page(sensors, ac_monitor, heater_monitor, show_success=True)
+    
+    def _get_status_page(self, sensors, ac_monitor, heater_monitor, show_success=False):
         """Generate HTML status page."""
         # Get current temperatures
         inside_temps = sensors['inside'].read_all_temps(unit='F')
@@ -60,13 +112,20 @@ class TempWebServer:
         current_time = time.localtime()
         time_str = f"{current_time[0]}-{current_time[1]:02d}-{current_time[2]:02d} {current_time[3]:02d}:{current_time[4]:02d}:{current_time[5]:02d}"
         
+        # Success message
+        success_html = """
+        <div class="success-message">
+            ✅ Settings updated successfully!
+        </div>
+        """ if show_success else ""
+        
         html = """
         <!DOCTYPE html>
         <html>
         <head>
             <title>🌱 Auto Garden</title>
             <meta name="viewport" content="width=device-width, initial-scale=1">
-            <meta http-equiv="refresh" content="10">
+            <meta http-equiv="refresh" content="30">
             <meta charset="utf-8">
             <style>
                 * {{
@@ -185,6 +244,69 @@ class TempWebServer:
                     0%, 100% {{ opacity: 1; }}
                     50% {{ opacity: 0.8; }}
                 }}
+                .controls {{
+                    margin-top: 20px;
+                    padding: 20px;
+                    background: #f8f9fa;
+                    border-radius: 10px;
+                }}
+                .control-group {{
+                    margin: 15px 0;
+                }}
+                .control-label {{
+                    display: block;
+                    font-size: 16px;
+                    font-weight: 600;
+                    color: #34495e;
+                    margin-bottom: 8px;
+                }}
+                input[type="number"] {{
+                    width: 100%;
+                    padding: 12px;
+                    font-size: 18px;
+                    border: 2px solid #ddd;
+                    border-radius: 8px;
+                    transition: border-color 0.3s;
+                }}
+                input[type="number"]:focus {{
+                    outline: none;
+                    border-color: #667eea;
+                }}
+                .btn {{
+                    width: 100%;
+                    padding: 15px;
+                    font-size: 18px;
+                    font-weight: bold;
+                    color: white;
+                    background: linear-gradient(135deg, #667eea, #764ba2);
+                    border: none;
+                    border-radius: 10px;
+                    cursor: pointer;
+                    text-transform: uppercase;
+                    letter-spacing: 1px;
+                    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+                    transition: transform 0.2s;
+                }}
+                .btn:hover {{
+                    transform: translateY(-2px);
+                }}
+                .btn:active {{
+                    transform: translateY(0);
+                }}
+                .success-message {{
+                    background: #2ecc71;
+                    color: white;
+                    padding: 15px;
+                    border-radius: 10px;
+                    text-align: center;
+                    font-weight: bold;
+                    margin-bottom: 20px;
+                    animation: fadeIn 0.5s;
+                }}
+                @keyframes fadeIn {{
+                    from {{ opacity: 0; }}
+                    to {{ opacity: 1; }}
+                }}
                 .footer {{
                     text-align: center;
                     color: white;
@@ -207,11 +329,16 @@ class TempWebServer:
                     .temp-grid {{
                         grid-template-columns: 1fr;
                     }}
+                    .status {{
+                        flex-direction: column;
+                    }}
                 }}
             </style>
         </head>
         <body>
             <h1>🌱 Auto Garden Dashboard</h1>
+            
+            {success_message}
             
             <div class="temp-grid">
                 <div class="card temp-card">
@@ -242,15 +369,48 @@ class TempWebServer:
                         <div class="targets">Target: {heater_target}°F ± {heater_swing}°F</div>
                     </div>
                 </div>
+                
+                <form method="POST" action="/update" class="controls">
+                    <h2 style="text-align: center; color: #34495e; margin-bottom: 20px;">⚙️ Adjust Settings</h2>
+                    
+                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px;">
+                        <div>
+                            <div class="control-group">
+                                <label class="control-label">❄️ AC Target (°F)</label>
+                                <input type="number" name="ac_target" value="{ac_target}" step="0.5" min="60" max="85">
+                            </div>
+                            <div class="control-group">
+                                <label class="control-label">❄️ AC Swing (°F)</label>
+                                <input type="number" name="ac_swing" value="{ac_swing}" step="0.5" min="0.5" max="5">
+                            </div>
+                        </div>
+                        
+                        <div>
+                            <div class="control-group">
+                                <label class="control-label">🔥 Heater Target (°F)</label>
+                                <input type="number" name="heater_target" value="{heater_target}" step="0.5" min="60" max="85">
+                            </div>
+                            <div class="control-group">
+                                <label class="control-label">🔥 Heater Swing (°F)</label>
+                                <input type="number" name="heater_swing" value="{heater_swing}" step="0.5" min="0.5" max="5">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="control-group" style="margin-top: 20px;">
+                        <button type="submit" class="btn">💾 Save Settings</button>
+                    </div>
+                </form>
             </div>
             
             <div class="footer">
                 ⏰ Last updated: {time}<br>
-                🔄 Auto-refresh every 10 seconds
+                🔄 Auto-refresh every 30 seconds
             </div>
         </body>
         </html>
         """.format(
+            success_message=success_html,
             inside_temp=f"{inside_temp:.1f}" if isinstance(inside_temp, float) else inside_temp,
             outside_temp=f"{outside_temp:.1f}" if isinstance(outside_temp, float) else outside_temp,
             ac_status=ac_status,
