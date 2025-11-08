@@ -1,4 +1,4 @@
-import gc
+import gc # type: ignore
 
 def check_memory_once():
     """One-time memory check (for startup diagnostics)."""

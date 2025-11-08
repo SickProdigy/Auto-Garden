@@ -1,8 +1,8 @@
 from machine import Pin, WDT # type: ignore
-import time
-import network
+import time # type: ignore
+import network # type: ignore
 import json
-import gc  # ADD THIS - for garbage collection
+import gc  # type: ignore # ADD THIS - for garbage collection
 
 # Enable watchdog (8 seconds timeout - auto-reboot if frozen)
 # wdt = WDT(timeout=8000)  # Maximum is 8388ms, use 8000ms (8 seconds)
@@ -77,7 +77,7 @@ def load_config():
                     'heater_target': 72.0
                 }
             ],
-            'schedule_enabled': False, # Schedules disabled by default (user can enable via web)
+            'schedule_enabled': True, # Schedules disabled by default (user can enable via web)
             'permanent_hold': False    # Permanent hold disabled by default
         }
         
@@ -151,7 +151,7 @@ if wifi and wifi.isconnected():
     # Attempt time sync non-blocking (short timeout + retry flag)
     ntp_synced = False
     try:
-        import ntptime
+        import ntptime # type: ignore
         ntptime.settime()
         ntp_synced = True
         print("Time synced with NTP server")
@@ -316,13 +316,13 @@ while True:
         run_monitors(monitors)
 
         # Web requests
-        web_server.check_requests(sensors, ac_monitor, heater_monitor, schedule_monitor)
+        web_server.check_requests(sensors, ac_monitor, heater_monitor, schedule_monitor, config)
 
         # Retry NTP sync every ~10s if not yet synced
         if not ntp_synced and retry_ntp_attempts < max_ntp_attempts:
             # Try once immediately, then whenever (time.time() % 10) < 1 (rough 10s window)
             try:
-                import ntptime
+                import ntptime # type: ignore
                 if retry_ntp_attempts == 0 or (time.time() % 10) < 1:
                     ntptime.settime()
                     ntp_synced = True

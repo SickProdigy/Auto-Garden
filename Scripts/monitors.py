@@ -1,4 +1,4 @@
-import time
+import time # type: ignore
 from scripts.discord_webhook import send_discord_message
 from scripts.temperature_sensor import TemperatureSensor
 
@@ -262,7 +262,7 @@ class WiFiMonitor(Monitor):
     
     def run(self):
         """Check WiFi status, blink LED, attempt reconnect if needed."""
-        import network
+        import network # type: ignore
         from scripts.networking import connect_wifi
         
         is_connected = self.wifi.isconnected() if self.wifi else False

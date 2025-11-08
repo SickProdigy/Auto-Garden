@@ -1,4 +1,4 @@
-import time
+import time # type: ignore
 
 class ScheduleMonitor:
     """Monitor that checks and applies temperature schedules."""
