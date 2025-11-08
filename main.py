@@ -1,8 +1,12 @@
-from machine import Pin
+from machine import Pin, WDT
 import time
 import network
 import json
 import gc  # ADD THIS - for garbage collection
+
+# Enable watchdog (8 seconds timeout - auto-reboot if frozen)
+wdt = WDT(timeout=60000)
+print("Watchdog enabled (60s timeout)")
 
 # Initialize pins (LED light onboard)
 led = Pin("LED", Pin.OUT)
@@ -124,16 +128,20 @@ if wifi and wifi.isconnected():
     # Send startup notification to Discord
     send_discord_message(f"Pico W online at http://{ifconfig[0]} ✅")
     
-    # ===== START: NTP Time Sync =====
-    # Sync time with internet time server (required for schedules to work correctly)
-    # Without this, the Pico's clock starts at 2021 on every reboot
+    # Start web server early so page can load even if time sync is slow
+    web_server = TempWebServer(port=80)
+    web_server.start()
+
+    # Attempt time sync non-blocking (short timeout + retry flag)
+    ntp_synced = False
     try:
         import ntptime
-        ntptime.settime()  # Downloads current time from pool.ntp.org
+        ntptime.settime()
+        ntp_synced = True
         print("Time synced with NTP server")
     except Exception as e:
-        print("Failed to sync time: {}".format(e))
-    # ===== END: NTP Time Sync =====
+        print("Initial NTP sync failed: {}".format(e))
+        # Will retry later in loop
     
 else:
     # WiFi connection failed
@@ -141,12 +149,6 @@ else:
     print("WiFi Connection Failed!")
     print("="*50 + "\n")
 # ===== END: WiFi Connection =====
-
-# ===== START: Web Server Setup =====
-# Start web server for monitoring and control (accessible at http://192.168.86.43)
-web_server = TempWebServer(port=80)
-web_server.start()
-# ===== END: Web Server Setup =====
 
 # ===== START: Sensor Configuration =====
 # Define all temperature sensors and their alert thresholds
@@ -285,21 +287,36 @@ monitors = [
 print("Starting monitoring loop...")
 print("Press Ctrl+C to stop\n")
 
+# Add NTP retry flags (before main loop)
+retry_ntp_attempts = 0
+max_ntp_attempts = 5  # Try up to 5 times after initial failure
+
+
 # ===== START: Main Loop =====
 # Main monitoring loop (runs forever until Ctrl+C)
 while True:
     # Run all monitors (each checks if it's time to run via should_run())
     run_monitors(monitors)
-    
-    # Check for incoming web requests (non-blocking)
-    # Pass schedule_monitor so web interface can reload config when schedules change
+
+    # Web requests
     web_server.check_requests(sensors, ac_monitor, heater_monitor, schedule_monitor)
-    
-    # ===== START: Garbage Collection =====
-    # Free up unused memory to prevent fragmentation
+
+    # Retry NTP sync every ~10s if not yet synced
+    if not ntp_synced and retry_ntp_attempts < max_ntp_attempts:
+        # Try once immediately, then whenever (time.time() % 10) < 1 (rough 10s window)
+        try:
+            import ntptime
+            if retry_ntp_attempts == 0 or (time.time() % 10) < 1:
+                ntptime.settime()
+                ntp_synced = True
+                print("NTP sync succeeded on retry #{}".format(retry_ntp_attempts + 1))
+        except Exception as e:
+            # Increment only when an actual attempt was made
+            if retry_ntp_attempts == 0 or (time.time() % 10) < 1:
+                retry_ntp_attempts += 1
+                print("NTP retry {} failed: {}".format(retry_ntp_attempts, e))
+
     gc.collect()
-    # ===== END: Garbage Collection =====
-    
-    # Small delay to prevent CPU overload (0.1 seconds = 10 loops per second)
+    wdt.feed()  # Reset watchdog timer (prevent auto-reboot)
     time.sleep(0.1)
 # ===== END: Main Loop =====
