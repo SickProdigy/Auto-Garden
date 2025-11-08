@@ -8,6 +8,7 @@ class TempWebServer:
         self.port = port
         self.socket = None
         self.sensors = {}
+        self.last_page_render = 0  # Track last successful HTML generation
     
     def start(self):
         """Start the web server (non-blocking)."""
@@ -20,34 +21,47 @@ class TempWebServer:
             print("Web server started on port {}".format(self.port))
         except Exception as e:
             print("Failed to start web server: {}".format(e))
-    
+
     def check_requests(self, sensors, ac_monitor=None, heater_monitor=None, schedule_monitor=None):
         """Check for incoming requests (call in main loop)."""
         if not self.socket:
             return
-        
         try:
             conn, addr = self.socket.accept()
             conn.settimeout(3.0)
             request = conn.recv(1024).decode('utf-8')
-            
-            # Check if this is a POST request (form submission)
+
             if 'POST /update' in request:
                 response = self._handle_update(request, sensors, ac_monitor, heater_monitor, schedule_monitor)
+
+            elif 'GET /schedule' in request:
+                response = self._get_schedule_editor_page(sensors, ac_monitor, heater_monitor)
+                conn.send('HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n')
+                conn.sendall(response.encode('utf-8'))
+                conn.close()
+                return
+
             elif 'POST /schedule' in request:
                 response = self._handle_schedule_update(request, sensors, ac_monitor, heater_monitor, schedule_monitor)
+                # If handler returns a redirect response, send it raw and exit
+                if isinstance(response, str) and response.startswith('HTTP/1.1 303'):
+                    conn.sendall(response.encode('utf-8'))
+                    conn.close()
+                    return
+            elif 'GET /ping' in request:
+                # Quick health check endpoint (no processing)
+                conn.send('HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n')
+                conn.sendall(b'OK')
+                conn.close()
+                return
+
             else:
-                # Regular GET request
                 response = self._get_status_page(sensors, ac_monitor, heater_monitor)
-            
-            # Make sure we have a valid response
+
             if response is None:
-                print("Error: response is None, generating default page")
                 response = self._get_status_page(sensors, ac_monitor, heater_monitor)
-            
-            conn.send('HTTP/1.1 200 OK\r\n')
-            conn.send('Content-Type: text/html; charset=utf-8\r\n')
-            conn.send('Connection: close\r\n\r\n')
+
+            conn.send('HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n')
             conn.sendall(response.encode('utf-8'))
             conn.close()
         except OSError:
@@ -56,12 +70,24 @@ class TempWebServer:
             print("Web server error: {}".format(e))
             import sys
             sys.print_exception(e)
-    
+
     def _save_config_to_file(self, config):
-        """Save configuration to config.json file."""
+        """Save configuration to config.json file (atomic write)."""
         try:
-            with open('config.json', 'w') as f:
+            import os
+            # Write to temp file first
+            with open('config.tmp', 'w') as f:
                 json.dump(config, f)
+            
+            # Remove old config if exists
+            try:
+                os.remove('config.json')
+            except:
+                pass
+            
+            # Rename temp to config (atomic on most filesystems)
+            os.rename('config.tmp', 'config.json')
+            
             print("Settings saved to config.json")
             return True
         except Exception as e:
@@ -86,6 +112,7 @@ class TempWebServer:
     
     def _handle_schedule_update(self, request, sensors, ac_monitor, heater_monitor, schedule_monitor):
         """Handle schedule form submission."""
+
         try:
             body = request.split('\r\n\r\n')[1] if '\r\n\r\n' in request else ''
             params = {}
@@ -160,7 +187,6 @@ class TempWebServer:
                 
                 # Redirect back to homepage
                 return 'HTTP/1.1 303 See Other\r\nLocation: /\r\n\r\n'
-            # ===== END: Handle mode actions =====
             
             elif mode_action == 'save_schedules':
                 # Just fall through to schedule parsing below
@@ -177,6 +203,20 @@ class TempWebServer:
                 heater_key = 'schedule_{}_heater'.format(i)
                 
                 if time_key in params and params[time_key]:
+                    # Validate time format (HH:MM)
+                    time_val = params[time_key]
+                    if ':' not in time_val or len(time_val.split(':')) != 2:
+                        print("Invalid time format: {}".format(time_val))
+                        return 'HTTP/1.1 303 See Other\r\nLocation: /schedule\r\n\r\n'
+                    
+                    try:
+                        hours, mins = time_val.split(':')
+                        if not (0 <= int(hours) <= 23 and 0 <= int(mins) <= 59):
+                            raise ValueError
+                    except:
+                        print("Invalid time value: {}".format(time_val))
+                        return 'HTTP/1.1 303 See Other\r\nLocation: /schedule\r\n\r\n'
+                    
                     schedule = {
                         'time': params[time_key],
                         'name': params.get(name_key, 'Schedule {}'.format(i+1)),
@@ -223,13 +263,16 @@ class TempWebServer:
             except:
                 pass
             # ===== END: Handle schedule configuration save =====
-                
+            
+            # Redirect back to schedule page
+            return 'HTTP/1.1 303 See Other\r\nLocation: /schedule\r\n\r\n'
+            
         except Exception as e:
             print("Error updating schedule: {}".format(e))
             import sys
             sys.print_exception(e)
-        
-        return self._get_status_page(sensors, ac_monitor, heater_monitor, show_success=True)
+            # Safety: avoid rendering an error page here; just redirect
+            return 'HTTP/1.1 303 See Other\r\nLocation: /schedule\r\n\r\n'
 
     def _handle_update(self, request, sensors, ac_monitor, heater_monitor, schedule_monitor):
         """Handle form submission and update settings."""
@@ -342,12 +385,18 @@ class TempWebServer:
         """Generate HTML status page."""
         print("DEBUG: Generating status page...")
         try:
-            # Get current temperatures
-            inside_temps = sensors['inside'].read_all_temps(unit='F')
-            outside_temps = sensors['outside'].read_all_temps(unit='F')
+            # Get current temperatures (use cached values to avoid blocking)
+            inside_temp = getattr(sensors.get('inside'), 'last_temp', None)
+            outside_temp = getattr(sensors.get('outside'), 'last_temp', None)
             
-            inside_temp = list(inside_temps.values())[0] if inside_temps else "N/A"
-            outside_temp = list(outside_temps.values())[0] if outside_temps else "N/A"
+            # Fallback to sensor read if no cached value (first load only)
+            if inside_temp is None:
+                inside_temps = sensors['inside'].read_all_temps(unit='F')
+                inside_temp = list(inside_temps.values())[0] if inside_temps else "N/A"
+            
+            if outside_temp is None:
+                outside_temps = sensors['outside'].read_all_temps(unit='F')
+                outside_temp = list(outside_temps.values())[0] if outside_temps else "N/A"
             
             # Get AC/Heater status
             ac_status = "ON" if ac_monitor and ac_monitor.ac.get_state() else "OFF"
@@ -386,6 +435,9 @@ class TempWebServer:
             
             # Build schedule cards
             schedule_cards = ""
+            
+            # Build mode buttons for dashboard
+            mode_buttons = self._build_mode_buttons(config)
             if config.get('schedules'):
                 for schedule in config.get('schedules', []):
                     # ===== START: Decode URL-encoded values =====
@@ -415,9 +467,6 @@ class TempWebServer:
                     No schedules configured
                 </div>
                 """
-            
-            # Build schedule form
-            schedule_form = self._build_schedule_form(config)
             
             # Success message
             success_html = """
@@ -732,7 +781,13 @@ class TempWebServer:
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px;">
             {schedule_cards}
         </div>
-        {schedule_form}
+        {mode_buttons}
+        
+        <div style="margin-top: 20px; text-align: center;">
+            <a href="/schedule" class="btn" style="text-decoration: none; display: inline-block;">
+                ⚙️ Edit Schedules
+            </a>
+        </div>
     </div>
     
     <div class="footer">
@@ -759,8 +814,9 @@ class TempWebServer:
                 schedule_color=schedule_color,
                 schedule_icon=schedule_icon,
                 schedule_cards=schedule_cards,
-                schedule_form=schedule_form
+                mode_buttons=mode_buttons
             )
+            self.last_page_render = time.time()  # Track successful render
             return html
             
         except Exception as e:
@@ -771,13 +827,11 @@ class TempWebServer:
 
     def _get_error_page(self, error_title, error_message, sensors, ac_monitor, heater_monitor):
         """Generate error page with message."""
-        # Get current temps
-        inside_temps = sensors['inside'].read_all_temps(unit='F')
-        outside_temps = sensors['outside'].read_all_temps(unit='F')
+        # Get current temps (cached, fast - no blocking sensor reads)
+        inside_temp = getattr(sensors.get('inside'), 'last_temp', None) or "N/A"
+        outside_temp = getattr(sensors.get('outside'), 'last_temp', None) or "N/A"
         
-        inside_temp = list(inside_temps.values())[0] if inside_temps else "N/A"
-        outside_temp = list(outside_temps.values())[0] if outside_temps else "N/A"
-        
+        # Format temperature values
         inside_temp_str = "{:.1f}".format(inside_temp) if isinstance(inside_temp, float) else str(inside_temp)
         outside_temp_str = "{:.1f}".format(outside_temp) if isinstance(outside_temp, float) else str(outside_temp)
         
@@ -896,137 +950,197 @@ class TempWebServer:
         )
         
         return html
-    
-    def _build_schedule_form(self, config):
-        """Build the schedule editing form."""
+
+    def _get_schedule_editor_page(self, sensors, ac_monitor, heater_monitor):
+        """Generate schedule editor page (no auto-refresh, schedules only)."""
+        # Get current temps (use cached to avoid blocking)
+        inside_temp = getattr(sensors.get('inside'), 'last_temp', None) or "N/A"
+        outside_temp = getattr(sensors.get('outside'), 'last_temp', None) or "N/A"
+        
+        # Format temperature values
+        inside_temp_str = "{:.1f}".format(inside_temp) if isinstance(inside_temp, float) else str(inside_temp)
+        outside_temp_str = "{:.1f}".format(outside_temp) if isinstance(outside_temp, float) else str(outside_temp)
+        
+        # Load config
+        config = self._load_config()
         schedules = config.get('schedules', [])
         
         # Pad with empty schedules up to 4
         while len(schedules) < 4:
-            schedules.append({'time': '', 'name': '', 'ac_target': 77.0, 'heater_target': 80.0})
+            schedules.append({'time': '', 'name': '', 'ac_target': 75.0, 'heater_target': 72.0})
         
-        # ===== START: Determine current mode =====
-        # Check if schedules exist
-        has_schedules = len([s for s in schedules if s.get('time')]) > 0
-        
-        # Determine mode based on config
-        if not has_schedules:
-            current_mode = "no_schedules"  # No schedules configured yet
-        elif config.get('schedule_enabled'):
-            current_mode = "automatic"  # Schedules are running
-        elif config.get('permanent_hold', False):
-            current_mode = "permanent_hold"  # User disabled schedules permanently
-        else:
-            current_mode = "temporary_hold"  # Manual override (HOLD mode)
-        # ===== END: Determine current mode =====
-        
-        # ===== START: Build mode control buttons =====
-        if current_mode == "no_schedules":
-            # No mode buttons if no schedules configured
-            mode_buttons = """
-            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center; color: #7f8c8d; margin-bottom: 20px;">
-                ℹ️ Configure schedules below, then choose a mode
-            </div>
-            """
-        elif current_mode == "automatic":
-            # Automatic mode active
-            mode_buttons = """
-            <div style="background: linear-gradient(135deg, #2ecc71, #27ae60); color: white; padding: 15px; border-radius: 10px; margin-bottom: 20px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
-                <div style="font-weight: bold; font-size: 18px; margin-bottom: 10px;">
-                    ✅ Automatic Mode Active
-                </div>
-                <div style="font-size: 14px; margin-bottom: 15px;">
-                    Temperatures automatically adjust based on schedule
-                </div>
-                <div style="display: flex; gap: 10px; justify-content: center;">
-                    <button type="submit" name="mode_action" value="temporary_hold" style="padding: 8px 16px; background: #f39c12; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;">
-                        ⏸️ Temporary Hold
-                    </button>
-                    <button type="submit" name="mode_action" value="permanent_hold" style="padding: 8px 16px; background: #e74c3c; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;">
-                        🛑 Permanent Hold
-                    </button>
-                </div>
-            </div>
-            """
-        elif current_mode == "temporary_hold":
-            # Temporary hold (manual override)
-            mode_buttons = """
-            <div style="background: linear-gradient(135deg, #f39c12, #e67e22); color: white; padding: 15px; border-radius: 10px; margin-bottom: 20px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
-                <div style="font-weight: bold; font-size: 18px; margin-bottom: 10px;">
-                    ⏸️ Temporary Hold Active
-                </div>
-                <div style="font-size: 14px; margin-bottom: 15px;">
-                    Manual settings in use - Schedule paused
-                </div>
-                <div style="display: flex; gap: 10px; justify-content: center;">
-                    <button type="submit" name="mode_action" value="resume" style="padding: 8px 16px; background: #2ecc71; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;">
-                        ▶️ Resume Schedule
-                    </button>
-                    <button type="submit" name="mode_action" value="permanent_hold" style="padding: 8px 16px; background: #e74c3c; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;">
-                        🛑 Make Permanent
-                    </button>
-                </div>
-            </div>
-            """
-        else:  # permanent_hold
-            # Permanent hold (schedules disabled by user)
-            mode_buttons = """
-            <div style="background: linear-gradient(135deg, #e74c3c, #c0392b); color: white; padding: 15px; border-radius: 10px; margin-bottom: 20px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
-                <div style="font-weight: bold; font-size: 18px; margin-bottom: 10px;">
-                    🛑 Permanent Hold Active
-                </div>
-                <div style="font-size: 14px; margin-bottom: 15px;">
-                    Schedules disabled - Manual control only
-                </div>
-                <div style="display: flex; gap: 10px; justify-content: center;">
-                    <button type="submit" name="mode_action" value="resume" style="padding: 8px 16px; background: #2ecc71; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;">
-                        ▶️ Enable Schedules
-                    </button>
-                </div>
-            </div>
-            """
-        # ===== END: Build mode control buttons =====
-        
-        form = """
-        <form method="POST" action="/schedule" class="controls" style="margin-top: 20px;">
-            <h3 style="color: #34495e; margin-bottom: 15px;">⚙️ Schedule Configuration</h3>
-            
-            {mode_buttons}
-        """.format(mode_buttons=mode_buttons)
-        
+        # Build schedule inputs
+        schedule_inputs = ""
         for i, schedule in enumerate(schedules[:4]):
-            form += """
-            <div class="schedule-row">
-                <div class="control-group" style="margin: 0;">
-                    <label class="control-label" style="font-size: 14px;">Time</label>
-                    <input type="time" name="schedule_{i}_time" value="{time}">
+            schedule_inputs += """
+            <div style="display: grid; grid-template-columns: 1fr 2fr 1fr 1fr; gap: 10px; margin-bottom: 10px; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+                <div>
+                    <label style="font-size: 14px; font-weight: bold; color: #34495e; display: block; margin-bottom: 5px;">Time</label>
+                    <input type="time" name="schedule_{i}_time" value="{time}" style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 5px;">
                 </div>
-                <div class="control-group" style="margin: 0;">
-                    <label class="control-label" style="font-size: 14px;">Name</label>
-                    <input type="text" name="schedule_{i}_name" value="{name}" placeholder="e.g. Morning">
+                <div>
+                    <label style="font-size: 14px; font-weight: bold; color: #34495e; display: block; margin-bottom: 5px;">Name</label>
+                    <input type="text" name="schedule_{i}_name" value="{name}" placeholder="e.g. Morning" style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 5px;">
                 </div>
-                <div class="control-group" style="margin: 0;">
-                    <label class="control-label" style="font-size: 14px;">Heater (°F)</label>
-                    <input type="number" name="schedule_{i}_heater" value="{heater}" step="0.5" min="60" max="85">
+                <div>
+                    <label style="font-size: 14px; font-weight: bold; color: #34495e; display: block; margin-bottom: 5px;">🔥 Heater (°F)</label>
+                    <input type="number" name="schedule_{i}_heater" value="{heater}" step="0.5" min="60" max="85" style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 5px;">
                 </div>
-                <div class="control-group" style="margin: 0;">
-                    <label class="control-label" style="font-size: 14px;">AC (°F)</label>
-                    <input type="number" name="schedule_{i}_ac" value="{ac}" step="0.5" min="60" max="85">
+                <div>
+                    <label style="font-size: 14px; font-weight: bold; color: #34495e; display: block; margin-bottom: 5px;">❄️ AC (°F)</label>
+                    <input type="number" name="schedule_{i}_ac" value="{ac}" step="0.5" min="60" max="85" style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 5px;">
                 </div>
             </div>
             """.format(
                 i=i,
                 time=schedule.get('time', ''),
                 name=schedule.get('name', ''),
-                ac=schedule.get('ac_target', 77.0),
-                heater=schedule.get('heater_target', 80.0)
+                heater=schedule.get('heater_target', 72.0),
+                ac=schedule.get('ac_target', 75.0)
             )
         
-        form += """
-            <div class="control-group" style="margin-top: 20px;">
-                <button type="submit" name="mode_action" value="save_schedules" class="btn">💾 Save Schedule Changes</button>
+        html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Schedule Editor - Climate Control</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta charset="utf-8">
+        <style>
+            body {{
+                font-family: Arial, sans-serif;
+                max-width: 1000px;
+                margin: 0 auto;
+                padding: 20px;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+            }}
+            .container {{
+                background: white;
+                border-radius: 15px;
+                padding: 30px;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            }}
+            h1 {{
+                color: #2c3e50;
+                text-align: center;
+                margin-bottom: 20px;
+            }}
+            .header-info {{
+                display: flex;
+                justify-content: center;
+                gap: 30px;
+                margin-bottom: 30px;
+                padding: 15px;
+                background: #f8f9fa;
+                border-radius: 10px;
+            }}
+            .btn {{
+                padding: 12px 24px;
+                background: linear-gradient(135deg, #667eea, #764ba2);
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-weight: bold;
+                cursor: pointer;
+                font-size: 16px;
+                text-decoration: none;
+                display: inline-block;
+            }}
+            .btn:hover {{ transform: translateY(-2px); }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>📅 Schedule Configuration</h1>
+            
+            <div class="header-info">
+                <div>🏠 Inside: <strong>{inside_temp}°F</strong></div>
+                <div>🌡️ Outside: <strong>{outside_temp}°F</strong></div>
             </div>
-        </form>
-        """
+            
+            <form method="POST" action="/schedule">
+                <h3 style="color: #34495e; margin-bottom: 15px;">⏰ Configure Schedule Times & Temperatures</h3>
+                <p style="color: #7f8c8d; margin-bottom: 20px;">
+                    Set up to 4 time-based schedules. Leave time blank to disable a schedule.
+                </p>
+                
+                {schedule_inputs}
+                
+                <div style="margin-top: 20px;">
+                    <button type="submit" name="mode_action" value="save_schedules" class="btn" style="width: 100%;">
+                        💾 Save Schedule Configuration
+                    </button>
+                </div>
+            </form>
+            
+            <div style="text-align: center; margin-top: 20px;">
+                <a href="/" class="btn" style="background: linear-gradient(135deg, #95a5a6, #7f8c8d);">
+                    ⬅️ Back to Dashboard
+                </a>
+            </div>
+            
+            <div style="text-align: center; color: #7f8c8d; margin-top: 20px; padding-top: 20px; border-top: 2px solid #ecf0f1;">
+                💡 This page does not auto-refresh<br>
+                To change modes (Automatic/Hold), return to the dashboard
+            </div>
+        </div>
+    </body>
+    </html>
+        """.format(
+            inside_temp=inside_temp_str,
+            outside_temp=outside_temp_str,
+            schedule_inputs=schedule_inputs
+        )
         
-        return form
+        return html
+    
+    def _build_mode_buttons(self, config):
+        """Build mode control buttons for dashboard only."""
+        schedules = config.get('schedules', [])
+        has_schedules = len([s for s in schedules if s.get('time')]) > 0
+        
+        if not has_schedules:
+            return """
+            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center; color: #7f8c8d; margin: 20px 0;">
+                ℹ️ No schedules configured - <a href="/schedule" style="color: #667eea; font-weight: bold;">Configure schedules</a>
+            </div>
+            """
+        
+        # Build mode buttons based on current state
+        if config.get('schedule_enabled'):
+            return """
+            <form method="POST" action="/schedule" style="margin: 20px 0;">
+                <div style="background: linear-gradient(135deg, #2ecc71, #27ae60); color: white; padding: 15px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
+                    <div style="font-weight: bold; font-size: 18px; margin-bottom: 10px;">✅ Automatic Mode</div>
+                    <div style="font-size: 14px; margin-bottom: 15px;">Temperatures adjust based on schedule</div>
+                    <div style="display: flex; gap: 10px; justify-content: center;">
+                        <button type="submit" name="mode_action" value="temporary_hold" style="padding: 10px 20px; background: #f39c12; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;">⏸️ Pause</button>
+                        <button type="submit" name="mode_action" value="permanent_hold" style="padding: 10px 20px; background: #e74c3c; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;">🛑 Disable</button>
+                    </div>
+                </div>
+            </form>
+            """
+        elif config.get('permanent_hold', False):
+            return """
+            <form method="POST" action="/schedule" style="margin: 20px 0;">
+                <div style="background: linear-gradient(135deg, #e74c3c, #c0392b); color: white; padding: 15px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
+                    <div style="font-weight: bold; font-size: 18px; margin-bottom: 10px;">🛑 Permanent Hold</div>
+                    <div style="font-size: 14px; margin-bottom: 15px;">Manual control only - Schedules disabled</div>
+                    <button type="submit" name="mode_action" value="resume" style="padding: 10px 20px; background: #2ecc71; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;">▶️ Enable Schedules</button>
+                </div>
+            </form>
+            """
+        else:
+            return """
+            <form method="POST" action="/schedule" style="margin: 20px 0;">
+                <div style="background: linear-gradient(135deg, #f39c12, #e67e22); color: white; padding: 15px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
+                    <div style="font-weight: bold; font-size: 18px; margin-bottom: 10px;">⏸️ Temporary Hold</div>
+                    <div style="font-size: 14px; margin-bottom: 15px;">Manual override active</div>
+                    <div style="display: flex; gap: 10px; justify-content: center;">
+                        <button type="submit" name="mode_action" value="resume" style="padding: 10px 20px; background: #2ecc71; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;">▶️ Resume</button>
+                        <button type="submit" name="mode_action" value="permanent_hold" style="padding: 10px 20px; background: #e74c3c; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;">🛑 Disable</button>
+                    </div>
+                </div>
+            </form>
+            """
