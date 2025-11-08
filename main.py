@@ -1,12 +1,12 @@
-from machine import Pin, WDT
+from machine import Pin, WDT # type: ignore
 import time
 import network
 import json
 import gc  # ADD THIS - for garbage collection
 
 # Enable watchdog (8 seconds timeout - auto-reboot if frozen)
-wdt = WDT(timeout=60000)
-print("Watchdog enabled (60s timeout)")
+# wdt = WDT(timeout=8000)  # Maximum is 8388ms, use 8000ms (8 seconds)
+# print("Watchdog enabled (8s timeout)")
 
 # Initialize pins (LED light onboard)
 led = Pin("LED", Pin.OUT)
@@ -317,6 +317,5 @@ while True:
                 print("NTP retry {} failed: {}".format(retry_ntp_attempts, e))
 
     gc.collect()
-    wdt.feed()  # Reset watchdog timer (prevent auto-reboot)
     time.sleep(0.1)
 # ===== END: Main Loop =====
