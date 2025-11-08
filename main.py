@@ -295,27 +295,51 @@ max_ntp_attempts = 5  # Try up to 5 times after initial failure
 # ===== START: Main Loop =====
 # Main monitoring loop (runs forever until Ctrl+C)
 while True:
-    # Run all monitors (each checks if it's time to run via should_run())
-    run_monitors(monitors)
+    try:
+        # Run all monitors (each checks if it's time to run via should_run())
+        run_monitors(monitors)
 
-    # Web requests
-    web_server.check_requests(sensors, ac_monitor, heater_monitor, schedule_monitor)
+        # Web requests
+        web_server.check_requests(sensors, ac_monitor, heater_monitor, schedule_monitor)
 
-    # Retry NTP sync every ~10s if not yet synced
-    if not ntp_synced and retry_ntp_attempts < max_ntp_attempts:
-        # Try once immediately, then whenever (time.time() % 10) < 1 (rough 10s window)
-        try:
-            import ntptime
-            if retry_ntp_attempts == 0 or (time.time() % 10) < 1:
-                ntptime.settime()
-                ntp_synced = True
-                print("NTP sync succeeded on retry #{}".format(retry_ntp_attempts + 1))
-        except Exception as e:
-            # Increment only when an actual attempt was made
-            if retry_ntp_attempts == 0 or (time.time() % 10) < 1:
-                retry_ntp_attempts += 1
-                print("NTP retry {} failed: {}".format(retry_ntp_attempts, e))
-
-    gc.collect()
-    time.sleep(0.1)
+        # Retry NTP sync every ~10s if not yet synced
+        if not ntp_synced and retry_ntp_attempts < max_ntp_attempts:
+            # Try once immediately, then whenever (time.time() % 10) < 1 (rough 10s window)
+            try:
+                import ntptime
+                if retry_ntp_attempts == 0 or (time.time() % 10) < 1:
+                    ntptime.settime()
+                    ntp_synced = True
+                    print("NTP sync succeeded on retry #{}".format(retry_ntp_attempts + 1))
+            except Exception as e:
+                # Increment only when an actual attempt was made
+                if retry_ntp_attempts == 0 or (time.time() % 10) < 1:
+                    retry_ntp_attempts += 1
+                    print("NTP retry {} failed: {}".format(retry_ntp_attempts, e))
+        # Enable garbage collection to free memory
+        gc.collect()
+        time.sleep(0.1)
+        
+    except KeyboardInterrupt:
+        # Graceful shutdown on Ctrl+C
+        print("\n\n" + "="*50)
+        print("Shutting down gracefully...")
+        print("="*50)
+        print("Turning off AC...")
+        ac_controller.turn_off()
+        print("Turning off heater...")
+        heater_controller.turn_off()
+        print("Turning off LED...")
+        led.low()
+        print("Shutdown complete!")
+        print("="*50 + "\n")
+        break
+        
+    except Exception as e:
+        # If loop crashes, print error and keep running
+        print("❌ Main loop error: {}".format(e))
+        import sys
+        sys.print_exception(e)
+        print("⚠️ Pausing 5 seconds before retrying...")
+        time.sleep(5)  # Brief pause before retrying
 # ===== END: Main Loop =====
