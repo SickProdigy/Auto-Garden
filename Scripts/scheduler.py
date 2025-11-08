@@ -20,6 +20,8 @@ class ScheduleMonitor:
         self.last_check = 0
         self.current_schedule = None
         self.last_applied_schedule = None
+        self.temp_hold_start_time = None  # When temporary hold was activated
+        self.temp_hold_duration = config.get('temp_hold_duration', 3600)  # Use config value, default 1 hour
     
     def should_run(self):
         """Check if it's time to run this monitor."""
@@ -132,6 +134,45 @@ class ScheduleMonitor:
     
     def run(self):
         """Check if schedule needs to be updated."""
+        
+        # ===== START: Check if temporary hold has expired =====
+        if not self.config.get('schedule_enabled', False) and not self.config.get('permanent_hold', False):
+            # We're in temporary hold mode
+            if self.temp_hold_start_time is None:
+                # Just entered hold mode, record start time
+                self.temp_hold_start_time = time.time()
+                print("⏸️ Temporary hold started - will auto-resume in {} minutes".format(
+                    self.temp_hold_duration // 60
+                ))
+            else:
+                # Check if hold has expired
+                elapsed = time.time() - self.temp_hold_start_time
+                if elapsed >= self.temp_hold_duration:
+                    # Hold expired, resume schedules
+                    print("⏰ Temporary hold expired - resuming automatic mode")
+                    self.config['schedule_enabled'] = True
+                    self.config['permanent_hold'] = False
+                    self.temp_hold_start_time = None
+                    
+                    # Save updated config
+                    try:
+                        import json
+                        with open('config.json', 'w') as f:
+                            json.dump(self.config, f)
+                    except:
+                        pass
+                    
+                    # Send Discord notification
+                    try:
+                        from scripts.discord_webhook import send_discord_message
+                        send_discord_message("⏰ Temporary hold expired - Automatic mode resumed")
+                    except:
+                        pass
+        else:
+            # Not in temporary hold, reset timer
+            self.temp_hold_start_time = None
+        # ===== END: Check if temporary hold has expired =====
+        
         # Find and apply active schedule
         active_schedule = self._find_active_schedule()
         if active_schedule:
