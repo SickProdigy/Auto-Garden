@@ -95,6 +95,22 @@ def load_config():
 
 # Load configuration from file
 config = load_config()
+
+# ===== START: Reset hold modes on startup =====
+# Always reset to automatic mode on boot (don't persist hold states)
+if 'schedule_enabled' in config:
+    config['schedule_enabled'] = True  # Always enable schedules on boot
+if 'permanent_hold' in config:
+    config['permanent_hold'] = False   # Always clear permanent hold on boot
+
+# Save the reset config immediately
+try:
+    with open('config.json', 'w') as f:
+        json.dump(config, f)
+    print("✅ Hold modes reset - Automatic mode active")
+except Exception as e:
+    print("⚠️ Warning: Could not save config reset: {}".format(e))
+# ===== END: Reset hold modes on startup =====
 # ===== END: Configuration Loading =====
 
 # ===== START: WiFi Connection =====
