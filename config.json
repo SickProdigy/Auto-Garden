@@ -3,6 +3,7 @@
     "ac_swing": 1.0,
     "heater_target": 72.0,
     "heater_swing": 2.0,
+    "temp_hold_duration": 3600,
     "schedules": [
         {
             "time": "06:00",
