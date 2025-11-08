@@ -1,5 +1,5 @@
 import socket
-import time
+import time # type: ignore
 import json
 
 class TempWebServer:
@@ -22,7 +22,7 @@ class TempWebServer:
         except Exception as e:
             print("Failed to start web server: {}".format(e))
 
-    def check_requests(self, sensors, ac_monitor=None, heater_monitor=None, schedule_monitor=None):
+    def check_requests(self, sensors, ac_monitor, heater_monitor, schedule_monitor, config):
         """Check for incoming requests (call in main loop)."""
         if not self.socket:
             return
@@ -32,7 +32,7 @@ class TempWebServer:
             request = conn.recv(1024).decode('utf-8')
 
             if 'POST /update' in request:
-                response = self._handle_update(request, sensors, ac_monitor, heater_monitor, schedule_monitor)
+                response = self._handle_update(request, sensors, ac_monitor, heater_monitor, schedule_monitor, config)
 
             elif 'GET /schedule' in request:
                 response = self._get_schedule_editor_page(sensors, ac_monitor, heater_monitor)
@@ -42,7 +42,7 @@ class TempWebServer:
                 return
 
             elif 'POST /schedule' in request:
-                response = self._handle_schedule_update(request, sensors, ac_monitor, heater_monitor, schedule_monitor)
+                response = self._handle_schedule_update(request, sensors, ac_monitor, heater_monitor, schedule_monitor, config)
                 # If handler returns a redirect response, send it raw and exit
                 if isinstance(response, str) and response.startswith('HTTP/1.1 303'):
                     conn.sendall(response.encode('utf-8'))
@@ -61,6 +61,18 @@ class TempWebServer:
             if response is None:
                 response = self._get_status_page(sensors, ac_monitor, heater_monitor, schedule_monitor)
 
+            # ===== START: Send response =====
+            print("DEBUG: Sending response ({} bytes)".format(len(response)))
+            try:
+                conn.send(response.encode('utf-8'))  # ← Changed to 'conn'
+                print("DEBUG: Response sent successfully")
+            except Exception as e:
+                print("ERROR: Failed to send response: {}".format(e))
+            finally:
+                conn.close()  # ← Changed to 'conn'
+                print("DEBUG: Client connection closed")
+            # ===== END: Send response =====
+
             conn.send('HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n')
             conn.sendall(response.encode('utf-8'))
             conn.close()
@@ -75,6 +87,9 @@ class TempWebServer:
         """Save configuration to config.json file (atomic write)."""
         try:
             import os
+            
+            print("DEBUG: Saving config with {} schedules".format(len(config.get('schedules', []))))
+            
             # Write to temp file first
             with open('config.tmp', 'w') as f:
                 json.dump(config, f)
@@ -91,7 +106,9 @@ class TempWebServer:
             print("Settings saved to config.json")
             return True
         except Exception as e:
-            print("Error saving config: {}".format(e))
+            print("❌ Error saving config: {}".format(e))
+            import sys
+            sys.print_exception(e)
             return False
     
     def _load_config(self):
@@ -110,7 +127,7 @@ class TempWebServer:
                 'permanent_hold': False
             }
     
-    def _handle_schedule_update(self, request, sensors, ac_monitor, heater_monitor, schedule_monitor):
+    def _handle_schedule_update(self, request, sensors, ac_monitor, heater_monitor, schedule_monitor, config):
         """Handle schedule form submission."""
 
         try:
@@ -121,9 +138,6 @@ class TempWebServer:
                 if '=' in pair:
                     key, value = pair.split('=', 1)
                     params[key] = value.replace('+', ' ')
-            
-            # Load current config
-            config = self._load_config()
             
             # ===== START: Handle mode actions =====
             mode_action = params.get('mode_action', '')
@@ -196,11 +210,17 @@ class TempWebServer:
             # ===== START: Handle schedule configuration save =====
             # Parse schedules (4 slots)
             schedules = []
+            has_any_schedule_data = False  # Track if user submitted ANY schedule data
+            
             for i in range(4):
                 time_key = 'schedule{}_time'.format(i)
                 name_key = 'schedule{}_name'.format(i)
                 ac_key = 'schedule{}_ac'.format(i)
                 heater_key = 'schedule{}_heater'.format(i)
+                
+                # Check if this schedule slot has data (even if just a name/temp)
+                if time_key in params or name_key in params or ac_key in params or heater_key in params:
+                    has_any_schedule_data = True
                 
                 if time_key in params and params[time_key]:
                     # URL decode the time (converts %3A back to :)
@@ -231,7 +251,13 @@ class TempWebServer:
                     }
                     schedules.append(schedule)
             
-            config['schedules'] = schedules
+            # Only update schedules if user submitted schedule form data
+            if has_any_schedule_data:
+                config['schedules'] = schedules
+                print("Updating schedules: {} schedules configured".format(len(schedules)))
+            else:
+                # No schedule data in form - preserve existing schedules
+                print("No schedule data in request - preserving existing schedules")
             
             # ===== START: Validate all schedules =====
             for i, schedule in enumerate(schedules):
@@ -280,7 +306,7 @@ class TempWebServer:
             # Safety: avoid rendering an error page here; just redirect
             return 'HTTP/1.1 303 See Other\r\nLocation: /schedule\r\n\r\n'
 
-    def _handle_update(self, request, sensors, ac_monitor, heater_monitor, schedule_monitor):
+    def _handle_update(self, request, sensors, ac_monitor, heater_monitor, schedule_monitor, config):
         """Handle form submission and update settings."""
         try:
             body = request.split('\r\n\r\n')[1] if '\r\n\r\n' in request else ''
@@ -290,9 +316,6 @@ class TempWebServer:
                 if '=' in pair:
                     key, value = pair.split('=', 1)
                     params[key] = float(value)
-            
-            # Load current config
-            config = self._load_config()
             
             # ===== START: Validate Heat <= AC =====
             # Get the values that will be set
