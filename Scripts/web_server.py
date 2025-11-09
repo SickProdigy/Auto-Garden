@@ -551,44 +551,50 @@ class TempWebServer:
                 print("Heater swing updated to {}°F".format(params['heater_swing']))
             # ===== END: Update Heater Settings =====
             
-            # ===== START: Disable scheduling ONLY if user manually changed temps =====
-            # Check if this is a user-initiated change (from web form)
-            # If AC or heater targets were changed, it's a manual override
-            user_changed_temps = (
-                ('ac_target' in params and params['ac_target'] != config.get('ac_target')) or
-                ('heater_target' in params and params['heater_target'] != config.get('heater_target'))
-            )
+            # ===== START: ALWAYS enter temporary hold when Save Settings is clicked =====
+            # User clicked "Save Settings" - enter temporary hold mode
+            config['schedule_enabled'] = False
+            config['permanent_hold'] = False
+            config['temp_hold_start_time'] = time.time()  # SET START TIME
+            print("⏸️ Temporary hold activated - Manual override")
             
-            if user_changed_temps and config.get('schedule_enabled'):
-                config['schedule_enabled'] = False
-                config['permanent_hold'] = False  # Temporary hold
-                print("⏸️ Schedule disabled - entering TEMPORARY HOLD mode (user override)")
-                
-                # Reload schedule monitor to disable it
-                if schedule_monitor:
-                    schedule_monitor.reload_config(config)
-            # ===== END: Disable scheduling ONLY if user manually changed temps =====
+            # Reload schedule monitor to disable it
+            if schedule_monitor:
+                schedule_monitor.reload_config(config)
+            # ===== END: ALWAYS enter temporary hold =====
+
             
             # ===== START: Save settings to file =====
             if self._save_config_to_file(config):
                 print("Settings persisted to disk")
+                
+                # ===== RELOAD config into memory immediately =====
+                try:
+                    with open('config.json', 'r') as f:
+                        updated_config = json.load(f)
+                        # Update the passed-in config dict (updates reference, not copy)
+                        config.clear()
+                        config.update(updated_config)
+                    print("✅ Config reloaded into memory")
+                except Exception as e:
+                    print("⚠️ Warning: Could not reload config: {}".format(e))
+                # ===== END: Reload config =====
             # ===== END: Save settings to file =====
             
-            # ===== START: Send Discord notification ONLY if user changed =====
-            if user_changed_temps:
-                try:
-                    from scripts.discord_webhook import send_discord_message
-                    ac_target_str = str(params.get('ac_target', 'N/A'))
-                    ac_swing_str = str(params.get('ac_swing', 'N/A'))
-                    heater_target_str = str(params.get('heater_target', 'N/A'))
-                    heater_swing_str = str(params.get('heater_swing', 'N/A'))
-                    
-                    message = "⏸️ HOLD Mode - Manual override: AC: {}F +/- {}F | Heater: {}F +/- {}F (Schedule disabled)".format(
-                        ac_target_str, ac_swing_str, heater_target_str, heater_swing_str
-                    )
-                    send_discord_message(message)
-                except Exception as discord_error:
-                    print("Discord notification failed: {}".format(discord_error))
+            # ===== START: Send Discord notification =====
+            try:
+                from scripts.discord_webhook import send_discord_message
+                ac_target_str = str(params.get('ac_target', 'N/A'))
+                ac_swing_str = str(params.get('ac_swing', 'N/A'))
+                heater_target_str = str(params.get('heater_target', 'N/A'))
+                heater_swing_str = str(params.get('heater_swing', 'N/A'))
+                
+                message = "⏸️ TEMPORARY HOLD - AC: {}F ± {}F | Heater: {}F ± {}F (1 hour)".format(
+                    ac_target_str, ac_swing_str, heater_target_str, heater_swing_str
+                )
+                send_discord_message(message)
+            except Exception as discord_error:
+                print("Discord notification failed: {}".format(discord_error))
             # ===== END: Send Discord notification =====
             
             # ===== START: Debug output =====
@@ -706,43 +712,47 @@ class TempWebServer:
             inside_temp_str = "{:.1f}".format(inside_temp) if isinstance(inside_temp, float) else str(inside_temp)
             outside_temp_str = "{:.1f}".format(outside_temp) if isinstance(outside_temp, float) else str(outside_temp)
             
-            # ===== START: Add HOLD mode banner with countdown timer =====
+          # ===== START: Add HOLD mode banner with countdown timer =====
             hold_banner = ""
             
             # Calculate remaining time for temporary hold
             temp_hold_remaining = ""
             if not config.get('schedule_enabled', False) and not config.get('permanent_hold', False):
-                # In temporary hold - check if we have schedule_monitor with timer
-                if schedule_monitor and hasattr(schedule_monitor, 'temp_hold_start_time'):
-                    if schedule_monitor.temp_hold_start_time is not None:
-                        # Calculate elapsed time
-                        elapsed = time.time() - schedule_monitor.temp_hold_start_time
-                        # Calculate remaining time
-                        remaining = schedule_monitor.temp_hold_duration - elapsed
+                # In temporary hold - check timer from CONFIG (not schedule_monitor)
+                temp_hold_start = config.get('temp_hold_start_time')  # READ FROM CONFIG
+                
+                if temp_hold_start is not None:
+                    # Get hold duration from config
+                    temp_hold_duration = config.get('temp_hold_duration', 3600)
+                    
+                    # Calculate elapsed time
+                    elapsed = time.time() - temp_hold_start
+                    # Calculate remaining time
+                    remaining = temp_hold_duration - elapsed
+                    
+                    if remaining > 0:
+                        # Convert to minutes
+                        mins_remaining = int(remaining // 60)
                         
-                        if remaining > 0:
-                            # Convert to minutes
-                            mins_remaining = int(remaining // 60)
-                            
-                            # Format the display text
-                            if mins_remaining > 60:
-                                # Show hours and minutes for long durations
-                                hours = mins_remaining // 60
-                                mins = mins_remaining % 60
-                                temp_hold_remaining = " - {}h {}m remaining".format(hours, mins)
-                            elif mins_remaining > 1:
-                                # Show just minutes
-                                temp_hold_remaining = " - {} min remaining".format(mins_remaining)
-                            elif mins_remaining == 1:
-                                # Show singular "minute"
-                                temp_hold_remaining = " - 1 minute remaining"
-                            else:
-                                # Less than 1 minute left
-                                secs_remaining = int(remaining)
-                                temp_hold_remaining = " - {}s remaining".format(secs_remaining)
+                        # Format the display text
+                        if mins_remaining > 60:
+                            # Show hours and minutes for long durations
+                            hours = mins_remaining // 60
+                            mins = mins_remaining % 60
+                            temp_hold_remaining = " - {}h {}m remaining".format(hours, mins)
+                        elif mins_remaining > 1:
+                            # Show just minutes
+                            temp_hold_remaining = " - {} min remaining".format(mins_remaining)
+                        elif mins_remaining == 1:
+                            # Show singular "minute"
+                            temp_hold_remaining = " - 1 minute remaining"
                         else:
-                            # Timer expired (should auto-resume soon)
-                            temp_hold_remaining = " - Resuming..."
+                            # Less than 1 minute left
+                            secs_remaining = int(remaining)
+                            temp_hold_remaining = " - {}s remaining".format(secs_remaining)
+                    else:
+                        # Timer expired (should auto-resume soon)
+                        temp_hold_remaining = " - Resuming..."
             
             if config.get('permanent_hold', False):
                 # PERMANENT HOLD - No timer, stays until user resumes or reboot
@@ -752,8 +762,7 @@ class TempWebServer:
                 </div>
                 """
             elif not config.get('schedule_enabled', False) and has_schedules:
-                # TEMPORARY HOLD - Show countdown timer if available
-                # Note: We'll need to accept schedule_monitor as parameter to access timer
+                # TEMPORARY HOLD - Show countdown timer
                 hold_banner = """
                 <div style="background: linear-gradient(135deg, #f39c12, #e67e22); color: white; padding: 15px; border-radius: 10px; text-align: center; font-weight: bold; margin-bottom: 20px; box-shadow: 0 4px 8px rgba(0,0,0,0.2); animation: fadeIn 0.5s;">
                     ⏸️ TEMPORARY HOLD - Manual override active{remaining}

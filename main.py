@@ -106,6 +106,8 @@ if 'schedule_enabled' in config:
     config['schedule_enabled'] = True  # Always enable schedules on boot
 if 'permanent_hold' in config:
     config['permanent_hold'] = False   # Always clear permanent hold on boot
+if 'temp_hold_start_time' in config:
+    config['temp_hold_start_time'] = None  # Clear temp hold start time
 
 # Save the reset config immediately
 try:
