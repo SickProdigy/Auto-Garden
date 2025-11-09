@@ -1,4 +1,4 @@
-from machine import Pin, WDT # type: ignore
+from machine import Pin, RTC # type: ignore
 import time # type: ignore
 import network # type: ignore
 import json
@@ -141,23 +141,60 @@ if wifi and wifi.isconnected():
     print(f"Web Interface:  http://{ifconfig[0]}")
     print("="*50 + "\n")
     
-    # Send startup notification to Discord
-    send_discord_message(f"Pico W online at http://{ifconfig[0]} ✅")
+    # Send startup notification to Discord (with timeout, non-blocking)
+    try:
+        success = send_discord_message(f"Pico W online at http://{ifconfig[0]} ✅")
+        if success:
+            print("Discord startup notification sent")
+        else:
+            print("Discord startup notification failed (continuing anyway)")
+    except Exception as e:
+        print("Discord notification error: {}".format(e))
     
     # Start web server early so page can load even if time sync is slow
     web_server = TempWebServer(port=80)
     web_server.start()
 
-    # Attempt time sync non-blocking (short timeout + retry flag)
+    # Attempt time sync with timeout (MicroPython compatible)
     ntp_synced = False
     try:
-        import ntptime # type: ignore
+        import ntptime  # type: ignore
+        import socket
+        import struct
+        
+        # Monkey-patch ntptime.time() to add timeout
+        original_time_func = ntptime.time
+        
+        def time_with_timeout():
+            """NTP time fetch with 3-second timeout."""
+            NTP_DELTA = 2208988800
+            host = "pool.ntp.org"
+            NTP_QUERY = bytearray(48)
+            NTP_QUERY[0] = 0x1B
+            
+            # Create socket with timeout
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(3.0)  # 3-second timeout
+            
+            try:
+                addr = socket.getaddrinfo(host, 123)[0][-1]
+                s.sendto(NTP_QUERY, addr)
+                msg = s.recv(48)
+                s.close()
+                val = struct.unpack("!I", msg[40:44])[0]
+                return val - NTP_DELTA
+            finally:
+                s.close()
+        
+        # Use patched version
+        ntptime.time = time_with_timeout
         ntptime.settime()
         ntp_synced = True
         print("Time synced with NTP server")
+        
     except Exception as e:
         print("Initial NTP sync failed: {}".format(e))
-        # Will retry later in loop
+        print("Will retry in background...")
     
 else:
     # WiFi connection failed
@@ -320,18 +357,40 @@ while True:
 
         # Retry NTP sync every ~10s if not yet synced
         if not ntp_synced and retry_ntp_attempts < max_ntp_attempts:
-            # Try once immediately, then whenever (time.time() % 10) < 1 (rough 10s window)
-            try:
-                import ntptime # type: ignore
-                if retry_ntp_attempts == 0 or (time.time() % 10) < 1:
-                    ntptime.settime()
-                    ntp_synced = True
-                    print("NTP sync succeeded on retry #{}".format(retry_ntp_attempts + 1))
-            except Exception as e:
-                # Increment only when an actual attempt was made
-                if retry_ntp_attempts == 0 or (time.time() % 10) < 1:
+            if retry_ntp_attempts == 0 or (time.time() % 10) < 1:
+                try:
+                    import ntptime  # type: ignore
+                    import socket
+                    import struct
+                    
+                    # Quick NTP sync with timeout
+                    NTP_DELTA = 2208988800
+                    host = "pool.ntp.org"
+                    NTP_QUERY = bytearray(48)
+                    NTP_QUERY[0] = 0x1B
+                    
+                    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    s.settimeout(3.0)  # 3-second timeout
+                    
+                    try:
+                        addr = socket.getaddrinfo(host, 123)[0][-1]
+                        s.sendto(NTP_QUERY, addr)
+                        msg = s.recv(48)
+                        val = struct.unpack("!I", msg[40:44])[0]
+                        t = val - NTP_DELTA
+                        
+                        tm = time.gmtime(t)
+                        RTC().datetime((tm[0], tm[1], tm[2], tm[6] + 1, tm[3], tm[4], tm[5], 0))
+                        
+                        ntp_synced = True
+                        print("NTP sync succeeded on retry #{}".format(retry_ntp_attempts + 1))
+                    finally:
+                        s.close()
+                        
+                except Exception as e:
                     retry_ntp_attempts += 1
                     print("NTP retry {} failed: {}".format(retry_ntp_attempts, e))
+
         # Enable garbage collection to free memory
         gc.collect()
         time.sleep(0.1)
