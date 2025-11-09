@@ -29,25 +29,110 @@ class TempWebServer:
         try:
             conn, addr = self.socket.accept()
             conn.settimeout(3.0)
-            request = conn.recv(1024).decode('utf-8')
+            
+            # Read request headers first (in chunks to avoid truncation)
+            request_bytes = b''
+            while b'\r\n\r\n' not in request_bytes:
+                chunk = conn.recv(512)
+                if not chunk:
+                    break
+                request_bytes += chunk
+                if len(request_bytes) > 4096:  # Safety limit
+                    break
+            
+            # Parse Content-Length from headers
+            request = request_bytes.decode('utf-8')
+            content_length = 0
+            if 'Content-Length:' in request:
+                for line in request.split('\r\n'):
+                    if line.lower().startswith('content-length:'):
+                        content_length = int(line.split(':')[1].strip())
+                        break
+            
+                        # If POST request with body, read remaining data
+            if 'POST' in request and content_length > 0:
+                # Check how much body we already have
+                header_end = request.find('\r\n\r\n') + 4
+                body_so_far = request[header_end:]
+                bytes_read = len(body_so_far.encode('utf-8'))
+                bytes_needed = content_length - bytes_read
+                
+                # ===== DEBUG: Print body reading info =====
+                print("DEBUG POST: Content-Length = {} bytes".format(content_length))
+                print("DEBUG POST: Already read = {} bytes".format(bytes_read))
+                print("DEBUG POST: Still need = {} bytes".format(bytes_needed))
+                # ===== END DEBUG =====
+                
+                # Read remaining body in loop (recv() may not return all at once!)
+                if bytes_needed > 0:
+                    remaining_parts = []
+                    total_read = 0
+                    
+                    # Keep reading until we have all bytes
+                    while total_read < bytes_needed:
+                        chunk = conn.recv(min(512, bytes_needed - total_read))
+                        if not chunk:
+                            print("WARNING: Connection closed before all data received!")
+                            break
+                        remaining_parts.append(chunk)
+                        total_read += len(chunk)
+                        print("DEBUG POST: Read {} bytes (total: {}/{})".format(
+                            len(chunk), total_read, bytes_needed))
+                    
+                    remaining = b''.join(remaining_parts)
+                    print("DEBUG POST: Read additional {} bytes (expected {})".format(
+                        len(remaining), bytes_needed))
+                    request = request[:header_end] + body_so_far + remaining.decode('utf-8')
+                
+                # ===== DEBUG: Print final body length =====
+                final_body = request[header_end:]
+                print("DEBUG POST: Final body length = {} bytes (expected {})".format(
+                    len(final_body), content_length))
+                print("DEBUG POST: First 100 chars = {}".format(final_body[:100]))
+                # ===== END DEBUG =====
 
             if 'POST /update' in request:
                 response = self._handle_update(request, sensors, ac_monitor, heater_monitor, schedule_monitor, config)
+                # If error page redirects, handle it
+                if isinstance(response, str) and response.startswith('HTTP/1.1'):
+                    print("DEBUG: Sending redirect from /update ({} bytes)".format(len(response)))
+                    conn.sendall(response.encode('utf-8'))
+                    conn.close()
+                    print("DEBUG: Redirect sent, connection closed")
+                    return
 
             elif 'GET /schedule' in request:
                 response = self._get_schedule_editor_page(sensors, ac_monitor, heater_monitor)
-                conn.send('HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n')
-                conn.sendall(response.encode('utf-8'))
+                response_bytes = response.encode('utf-8')
+                
+                # Send headers
+                conn.send('HTTP/1.1 200 OK\r\n')
+                conn.send('Content-Type: text/html; charset=utf-8\r\n')
+                conn.send('Content-Length: {}\r\n'.format(len(response_bytes)))
+                conn.send('Connection: close\r\n')
+                conn.send('\r\n')
+                
+                # Send body in chunks (MicroPython has small socket buffer)
+                chunk_size = 1024  # Send 1KB at a time
+                for i in range(0, len(response_bytes), chunk_size):
+                    chunk = response_bytes[i:i+chunk_size]
+                    conn.send(chunk)
+                    print("DEBUG: Sent chunk {} ({} bytes)".format(i//chunk_size + 1, len(chunk)))
+                
                 conn.close()
+                print("DEBUG: Schedule editor page sent successfully ({} bytes total)".format(len(response_bytes)))
                 return
 
             elif 'POST /schedule' in request:
                 response = self._handle_schedule_update(request, sensors, ac_monitor, heater_monitor, schedule_monitor, config)
-                # If handler returns a redirect response, send it raw and exit
-                if isinstance(response, str) and response.startswith('HTTP/1.1 303'):
+                # Redirects are already complete HTTP responses, send directly
+                if isinstance(response, str) and response.startswith('HTTP/1.1'):
+                    print("DEBUG: Sending redirect ({} bytes)".format(len(response)))
                     conn.sendall(response.encode('utf-8'))
                     conn.close()
+                    print("DEBUG: Redirect sent, connection closed")
                     return
+
             elif 'GET /ping' in request:
                 # Quick health check endpoint (no processing)
                 conn.send('HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n')
@@ -66,7 +151,7 @@ class TempWebServer:
             try:
                 # Check if response already has HTTP headers (like redirects)
                 if response.startswith('HTTP/1.1'):
-                    # Response already has headers (redirect), send as-is
+                    # Response already has headers (redirect or other), send as-is
                     conn.sendall(response.encode('utf-8'))
                 else:
                     # HTML response needs headers added first
@@ -168,8 +253,14 @@ class TempWebServer:
                 except:
                     pass
                 
-                # Redirect back to homepage
-                return 'HTTP/1.1 303 See Other\r\nLocation: /\r\n\r\n'
+                # Redirect back to Dashboard with proper headers
+                redirect_response = 'HTTP/1.1 303 See Other\r\n'
+                redirect_response += 'Location: /\r\n'
+                redirect_response += 'Content-Length: 0\r\n'
+                redirect_response += 'Connection: close\r\n'
+                redirect_response += '\r\n'
+                print("DEBUG: Returning redirect to dashboard")
+                return redirect_response
             
             elif mode_action == 'temporary_hold':
                 # Enter temporary hold (pause schedules temporarily)
@@ -188,8 +279,13 @@ class TempWebServer:
                 except:
                     pass
                 
-                # Redirect back to homepage
-                return 'HTTP/1.1 303 See Other\r\nLocation: /\r\n\r\n'
+                # Redirect to dashboard after error (settings weren't saved)
+                redirect_response = 'HTTP/1.1 303 See Other\r\n'
+                redirect_response += 'Location: /\r\n'
+                redirect_response += 'Content-Length: 0\r\n'
+                redirect_response += 'Connection: close\r\n'
+                redirect_response += '\r\n'
+                return redirect_response
             
             elif mode_action == 'permanent_hold':
                 # Enter permanent hold (disable schedules permanently)
@@ -208,8 +304,14 @@ class TempWebServer:
                 except:
                     pass
                 
-                # Redirect back to homepage
-                return 'HTTP/1.1 303 See Other\r\nLocation: /\r\n\r\n'
+                # Redirect back to Dashboard with proper headers
+                redirect_response = 'HTTP/1.1 303 See Other\r\n'
+                redirect_response += 'Location: /\r\n'
+                redirect_response += 'Content-Length: 0\r\n'
+                redirect_response += 'Connection: close\r\n'
+                redirect_response += '\r\n'
+                print("DEBUG: Returning redirect to dashboard")
+                return redirect_response
             
             elif mode_action == 'save_schedules':
                 # Just fall through to schedule parsing below
@@ -217,28 +319,56 @@ class TempWebServer:
             # ===== END: Handle mode actions =====
             
             # ===== START: Handle schedule configuration save =====
+            # DEBUG: Print what we received
+            print("DEBUG: Received POST body parameters:")
+            for key, value in params.items():
+                print("  {} = '{}'".format(key, value))
+            print("DEBUG: Total params received: {}".format(len(params)))
+            
             # Parse schedules (4 slots)
             schedules = []
-            has_any_schedule_data = False  # Track if user submitted ANY schedule data
+            has_any_schedule_data = False
             
             for i in range(4):
-                time_key = 'schedule{}_time'.format(i)
-                name_key = 'schedule{}_name'.format(i)
-                ac_key = 'schedule{}_ac'.format(i)
-                heater_key = 'schedule{}_heater'.format(i)
+                time_key = 'schedule_{}_time'.format(i)
+                name_key = 'schedule_{}_name'.format(i)
+                ac_key = 'schedule_{}_ac'.format(i)
+                heater_key = 'schedule_{}_heater'.format(i)
                 
-                # Check if this schedule slot has data (even if just a name/temp)
+                # Check if this schedule slot has data
                 if time_key in params or name_key in params or ac_key in params or heater_key in params:
                     has_any_schedule_data = True
                 
                 if time_key in params and params[time_key]:
+                    # ===== VALIDATE: If time is set, AC and Heater MUST be set =====
+                    if ac_key not in params or not params[ac_key]:
+                        print("❌ Validation failed: Schedule {} has time but missing AC target".format(i+1))
+                        return self._get_error_page(
+                            "Incomplete Schedule",
+                            "Schedule {}: AC target is required when time is set".format(i+1),
+                            sensors, ac_monitor, heater_monitor
+                        )
+                    
+                    if heater_key not in params or not params[heater_key]:
+                        print("❌ Validation failed: Schedule {} has time but missing Heater target".format(i+1))
+                        return self._get_error_page(
+                            "Incomplete Schedule",
+                            "Schedule {}: Heater target is required when time is set".format(i+1),
+                            sensors, ac_monitor, heater_monitor
+                        )
+                    # ===== END VALIDATION =====
+                    
                     # URL decode the time (converts %3A back to :)
                     schedule_time = params[time_key].replace('%3A', ':')
                     
                     # Validate time format
                     if ':' not in schedule_time or len(schedule_time.split(':')) != 2:
                         print("Invalid time format: {}".format(schedule_time))
-                        return 'HTTP/1.1 303 See Other\r\nLocation: /schedule\r\n\r\n'
+                        return self._get_error_page(
+                            "Invalid Time",
+                            "Schedule {}: Time format must be HH:MM".format(i+1),
+                            sensors, ac_monitor, heater_monitor
+                        )
                     
                     try:
                         hours, mins = schedule_time.split(':')
@@ -246,19 +376,36 @@ class TempWebServer:
                             raise ValueError
                     except:
                         print("Invalid time value: {}".format(schedule_time))
-                        return 'HTTP/1.1 303 See Other\r\nLocation: /schedule\r\n\r\n'
+                        return self._get_error_page(
+                            "Invalid Time",
+                            "Schedule {}: Invalid time value {}".format(i+1, schedule_time),
+                            sensors, ac_monitor, heater_monitor
+                        )
                     
-                    # URL decode the name too
+                    # URL decode the name
                     schedule_name = params.get(name_key, 'Schedule {}'.format(i+1)).replace('+', ' ')
+                    
+                    # Parse temperatures (they're guaranteed to exist due to validation above)
+                    try:
+                        ac_target = float(params[ac_key])
+                        heater_target = float(params[heater_key])
+                    except (ValueError, TypeError):
+                        return self._get_error_page(
+                            "Invalid Temperature",
+                            "Schedule {}: Temperature values must be numbers".format(i+1),
+                            sensors, ac_monitor, heater_monitor
+                        )
                     
                     # Create schedule entry
                     schedule = {
                         'time': schedule_time,
                         'name': schedule_name,
-                        'ac_target': float(params.get(ac_key, 75.0)),
-                        'heater_target': float(params.get(heater_key, 72.0))
+                        'ac_target': ac_target,
+                        'heater_target': heater_target
                     }
                     schedules.append(schedule)
+                    print("DEBUG: Parsed schedule {}: time='{}', name='{}', heater={}, ac={}".format(
+                        i, schedule_time, schedule_name, heater_target, ac_target))
             
             # Only update schedules if user submitted schedule form data
             if has_any_schedule_data:
@@ -305,15 +452,29 @@ class TempWebServer:
                 pass
             # ===== END: Handle schedule configuration save =====
             
-            # Redirect back to Dashboard
-            return 'HTTP/1.1 303 See Other\r\nLocation: /\r\n\r\n'
+            # Redirect back to homepage with cache-busting headers
+            redirect_response = 'HTTP/1.1 303 See Other\r\n'
+            redirect_response += 'Location: /\r\n'
+            redirect_response += 'Content-Length: 0\r\n'
+            redirect_response += 'Connection: close\r\n'
+            redirect_response += 'Cache-Control: no-cache, no-store, must-revalidate\r\n'
+            redirect_response += 'Pragma: no-cache\r\n'
+            redirect_response += 'Expires: 0\r\n'
+            redirect_response += '\r\n'
+            print("DEBUG: Returning redirect to dashboard (with cache-busting)")
+            return redirect_response
             
         except Exception as e:
             print("Error updating schedule: {}".format(e))
             import sys
             sys.print_exception(e)
             # Safety: avoid rendering an error page here; just redirect
-            return 'HTTP/1.1 303 See Other\r\nLocation: /schedule\r\n\r\n'
+            redirect_response = 'HTTP/1.1 303 See Other\r\n'
+            redirect_response += 'Location: /schedule\r\n'
+            redirect_response += 'Content-Length: 0\r\n'
+            redirect_response += 'Connection: close\r\n'
+            redirect_response += '\r\n'
+            return redirect_response
 
     def _handle_update(self, request, sensors, ac_monitor, heater_monitor, schedule_monitor, config):
         """Handle form submission and update settings."""
@@ -1053,37 +1214,55 @@ class TempWebServer:
         
         # Pad with empty schedules up to 4
         while len(schedules) < 4:
-            schedules.append({'time': '', 'name': '', 'ac_target': 75.0, 'heater_target': 72.0})
-        
+            schedules.append({
+                'time': '',
+                'name': '',
+                'ac_target': config.get('ac_target', 75.0),      # ✅ Uses 78°F from config
+                'heater_target': config.get('heater_target', 72.0)  # ✅ Uses 70°F from config
+            })
+
+        # ===== DEBUG: Verify we have 4 schedules =====
+        print("DEBUG: Schedule editor will render {} schedules:".format(len(schedules[:4])))
+        for i, s in enumerate(schedules[:4]):
+            print("  Schedule {}: time='{}', name='{}', heater={}, ac={}".format(
+                i, s.get('time', '(empty)'), s.get('name', '(empty)'),
+                s.get('heater_target', 'N/A'), s.get('ac_target', 'N/A')
+            ))
+        # ===== END DEBUG =====
+
         # Build schedule inputs
         schedule_inputs = ""
         for i, schedule in enumerate(schedules[:4]):
-            schedule_inputs += """
-            <div style="display: grid; grid-template-columns: 1fr 2fr 1fr 1fr; gap: 10px; margin-bottom: 10px; padding: 15px; background: #f8f9fa; border-radius: 8px;">
-                <div>
-                    <label style="font-size: 14px; font-weight: bold; color: #34495e; display: block; margin-bottom: 5px;">Time</label>
-                    <input type="time" name="schedule_{i}_time" value="{time}" style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 5px;">
-                </div>
-                <div>
-                    <label style="font-size: 14px; font-weight: bold; color: #34495e; display: block; margin-bottom: 5px;">Name</label>
-                    <input type="text" name="schedule_{i}_name" value="{name}" placeholder="e.g. Morning" style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 5px;">
-                </div>
-                <div>
-                    <label style="font-size: 14px; font-weight: bold; color: #34495e; display: block; margin-bottom: 5px;">🔥 Heater (°F)</label>
-                    <input type="number" name="schedule_{i}_heater" value="{heater}" step="0.5" min="60" max="85" style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 5px;">
-                </div>
-                <div>
-                    <label style="font-size: 14px; font-weight: bold; color: #34495e; display: block; margin-bottom: 5px;">❄️ AC (°F)</label>
-                    <input type="number" name="schedule_{i}_ac" value="{ac}" step="0.5" min="60" max="85" style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 5px;">
-                </div>
-            </div>
-            """.format(
-                i=i,
-                time=schedule.get('time', ''),
-                name=schedule.get('name', ''),
-                heater=schedule.get('heater_target', 72.0),
-                ac=schedule.get('ac_target', 75.0)
-            )
+            print("DEBUG: Building HTML for schedule {}...".format(i))
+            
+            time_value = schedule.get('time', '')
+            name_value = schedule.get('name', '')
+            heater_value = schedule.get('heater_target', config.get('heater_target', 72.0))
+            ac_value = schedule.get('ac_target', config.get('ac_target', 75.0))
+            
+            print("DEBUG:   Values: time='{}', name='{}', heater={}, ac={}".format(
+                time_value, name_value, heater_value, ac_value))
+            
+            # Build HTML - MINIMAL VERSION with hidden markers
+            schedule_inputs += '<div class="sched">\n'
+            schedule_inputs += '<h3>Schedule ' + str(i+1) + '</h3>\n'
+            
+            # Hidden input to mark this schedule exists (always sent)
+            schedule_inputs += '<input type="hidden" name="schedule_' + str(i) + '_exists" value="1">\n'
+            
+            schedule_inputs += '<label>Time</label>\n'
+            schedule_inputs += '<input type="time" name="schedule_' + str(i) + '_time" value="' + str(time_value) + '">\n'
+            schedule_inputs += '<label>Name</label>\n'
+            schedule_inputs += '<input type="text" name="schedule_' + str(i) + '_name" value="' + str(name_value) + '" placeholder="Schedule ' + str(i+1) + '">\n'
+            schedule_inputs += '<label>Heater (°F)</label>\n'
+            # Add required attribute to force validation
+            schedule_inputs += '<input type="number" name="schedule_' + str(i) + '_heater" value="' + str(heater_value) + '" step="0.5" min="60" max="85" required>\n'
+            schedule_inputs += '<label>AC (°F)</label>\n'
+            # Add required attribute to force validation
+            schedule_inputs += '<input type="number" name="schedule_' + str(i) + '_ac" value="' + str(ac_value) + '" step="0.5" min="60" max="90" required>\n'
+            schedule_inputs += '</div>\n'
+            
+            print("DEBUG:   HTML generated, length now: {} bytes".format(len(schedule_inputs)))
         
         html = """
     <!DOCTYPE html>
@@ -1093,6 +1272,30 @@ class TempWebServer:
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta charset="utf-8">
         <style>
+            .sched {{
+                background: #f8f9fa;
+                padding: 20px;
+                border-radius: 10px;
+                margin-bottom: 15px;
+                border: 2px solid #ddd;
+            }}
+            .sched h3 {{
+                color: #34495e;
+                margin-bottom: 15px;
+            }}
+            .sched label {{
+                display: block;
+                margin: 10px 0 5px 0;
+                font-weight: bold;
+                color: #555;
+            }}
+            .sched input {{
+                width: 100%;
+                padding: 8px;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                margin-bottom: 10px;
+            }}
             body {{
                 font-family: Arial, sans-serif;
                 max-width: 1000px;
