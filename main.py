@@ -47,6 +47,7 @@ def load_config():
         print("No saved config found, creating default config.json...")
         
         default_config = {
+            'timezone_offset': -6,     # Timezone offset from UTC (CST=-6, EST=-5, MST=-7, PST=-8, add 1 for DST)
             'ac_target': 75.0,         # Default AC target temp
             'ac_swing': 1.0,           # Default AC tolerance (+/- degrees)
             'heater_target': 72.0,     # Default heater target temp
@@ -95,6 +96,9 @@ def load_config():
 
 # Load configuration from file
 config = load_config()
+
+# Get timezone offset from config (with fallback to -6 if not present)
+TIMEZONE_OFFSET = config.get('timezone_offset', -6)
 
 # ===== START: Reset hold modes on startup =====
 # Always reset to automatic mode on boot (don't persist hold states)
@@ -179,11 +183,18 @@ if wifi and wifi.isconnected():
             finally:
                 s.close()
         
-        # Use patched version
-        ntptime.time = time_with_timeout
-        ntptime.settime()
+        # Get UTC time from NTP
+        utc_timestamp = time_with_timeout()
+        
+        # Apply timezone offset
+        local_timestamp = utc_timestamp + (TIMEZONE_OFFSET * 3600)
+        
+        # Set RTC with local time
+        tm = time.gmtime(local_timestamp)
+        RTC().datetime((tm[0], tm[1], tm[2], tm[6] + 1, tm[3], tm[4], tm[5], 0))
+        
         ntp_synced = True
-        print("Time synced with NTP server")
+        print("Time synced with NTP server (UTC{:+d})".format(TIMEZONE_OFFSET))
         
     except Exception as e:
         print("Initial NTP sync failed: {}".format(e))
@@ -369,13 +380,17 @@ while True:
                         s.sendto(NTP_QUERY, addr)
                         msg = s.recv(48)
                         val = struct.unpack("!I", msg[40:44])[0]
-                        t = val - NTP_DELTA
+                        utc_timestamp = val - NTP_DELTA
                         
-                        tm = time.gmtime(t)
+                        # Apply timezone offset
+                        local_timestamp = utc_timestamp + (TIMEZONE_OFFSET * 3600)
+                        
+                        # Set RTC with local time
+                        tm = time.gmtime(local_timestamp)
                         RTC().datetime((tm[0], tm[1], tm[2], tm[6] + 1, tm[3], tm[4], tm[5], 0))
                         
                         ntp_synced = True
-                        print("NTP sync succeeded on retry #{}".format(retry_ntp_attempts + 1))
+                        print("NTP sync succeeded on retry #{} (UTC{:+d})".format(retry_ntp_attempts + 1, TIMEZONE_OFFSET))
                     finally:
                         s.close()
                         

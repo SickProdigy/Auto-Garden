@@ -437,8 +437,28 @@ class TempWebServer:
             if self._save_config_to_file(config):
                 print("Schedule configuration saved")
                 
+                # ===== ADD THIS: Reload config into memory immediately =====
+                try:
+                    with open('config.json', 'r') as f:
+                        updated_config = json.load(f)
+                        # Update the passed-in config dict (updates reference, not copy)
+                        config.clear()
+                        config.update(updated_config)
+                    print("✅ Config reloaded into memory")
+                except Exception as e:
+                    print("⚠️ Warning: Could not reload config: {}".format(e))
+                # ===== END: Reload config =====
+                
                 if schedule_monitor:
                     schedule_monitor.reload_config(config)
+                    
+                # Update AC and heater monitors with new targets from config
+                if ac_monitor:
+                    ac_monitor.target_temp = config['ac_target']
+                    ac_monitor.temp_swing = config['ac_swing']
+                if heater_monitor:
+                    heater_monitor.target_temp = config['heater_target']
+                    heater_monitor.temp_swing = config['heater_swing']
             
             # Send Discord notification
             try:
