@@ -60,22 +60,31 @@ class TempWebServer:
 
             if response is None:
                 response = self._get_status_page(sensors, ac_monitor, heater_monitor, schedule_monitor)
-
-            # ===== START: Send response =====
+            
+            # ===== START: Send response with proper HTTP headers =====
             print("DEBUG: Sending response ({} bytes)".format(len(response)))
             try:
-                conn.send(response.encode('utf-8'))  # ← Changed to 'conn'
+                # Check if response already has HTTP headers (like redirects)
+                if response.startswith('HTTP/1.1'):
+                    # Response already has headers (redirect), send as-is
+                    conn.sendall(response.encode('utf-8'))
+                else:
+                    # HTML response needs headers added first
+                    conn.send(b'HTTP/1.1 200 OK\r\n')
+                    conn.send(b'Content-Type: text/html; charset=utf-8\r\n')
+                    conn.send('Content-Length: {}\r\n'.format(len(response.encode('utf-8'))).encode('utf-8'))
+                    conn.send(b'Connection: close\r\n')
+                    conn.send(b'\r\n')  # Blank line separates headers from body
+                    conn.sendall(response.encode('utf-8'))
+                
                 print("DEBUG: Response sent successfully")
             except Exception as e:
                 print("ERROR: Failed to send response: {}".format(e))
             finally:
-                conn.close()  # ← Changed to 'conn'
+                conn.close()
                 print("DEBUG: Client connection closed")
             # ===== END: Send response =====
 
-            conn.send('HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n')
-            conn.sendall(response.encode('utf-8'))
-            conn.close()
         except OSError:
             pass
         except Exception as e:
