@@ -3,10 +3,10 @@ import time # type: ignore
 import network # type: ignore
 import json
 import gc  # type: ignore # ADD THIS - for garbage collection
-
-# Enable watchdog (8 seconds timeout - auto-reboot if frozen)
-# wdt = WDT(timeout=8000)  # Maximum is 8388ms, use 8000ms (8 seconds)
-# print("Watchdog enabled (8s timeout)")
+import sys
+import socket  # type: ignore
+import struct  # type: ignore
+import ntptime  # type: ignore
 
 # Initialize pins (LED light onboard)
 led = Pin("LED", Pin.OUT)
@@ -157,14 +157,7 @@ if wifi and wifi.isconnected():
 
     # Attempt time sync with timeout (MicroPython compatible)
     ntp_synced = False
-    try:
-        import ntptime  # type: ignore
-        import socket
-        import struct
-        
-        # Monkey-patch ntptime.time() to add timeout
-        original_time_func = ntptime.time
-        
+    try:  
         def time_with_timeout():
             """NTP time fetch with 3-second timeout."""
             NTP_DELTA = 2208988800
@@ -343,7 +336,6 @@ print("Press Ctrl+C to stop\n")
 # Add NTP retry flags (before main loop)
 retry_ntp_attempts = 0
 max_ntp_attempts = 5  # Try up to 5 times after initial failure
-
 
 # ===== START: Main Loop =====
 # Main monitoring loop (runs forever until Ctrl+C)
