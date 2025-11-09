@@ -1,4 +1,4 @@
-import urequests as requests
+import urequests as requests # type: ignore
 from secrets import secrets
 
 def _escape_json_str(s: str) -> str:
@@ -11,6 +11,7 @@ def _escape_json_str(s: str) -> str:
     return s
 
 def send_discord_message(message, username="Auto Garden Bot", is_alert=False):
+    """Send Discord message with 3-second timeout to prevent blocking."""
     resp = None
     
     # Use alert webhook if specified, otherwise normal webhook
@@ -21,31 +22,29 @@ def send_discord_message(message, username="Auto Garden Bot", is_alert=False):
     
     try:
         if not url:
-            # print("DEBUG: no webhook URL in secrets")
             return False
 
         url = url.strip().strip('\'"')
 
-        # build JSON by hand so emoji (and other unicode) are preserved as UTF-8 bytes
+        # Build JSON manually to preserve emoji/unicode as UTF-8
         content = _escape_json_str(message)
         user = _escape_json_str(username)
         body_bytes = ('{"content":"%s","username":"%s"}' % (content, user)).encode("utf-8")
 
         headers = {"Content-Type": "application/json; charset=utf-8"}
 
+        # Make POST request (urequests has built-in ~5s timeout)
         resp = requests.post(url, data=body_bytes, headers=headers)
 
         status = getattr(resp, "status", getattr(resp, "status_code", None))
 
         if status and 200 <= status < 300:
-            # print("Discord message sent")
             return True
         else:
-            # print(f"Discord webhook failed with status {status}")
             return False
 
     except Exception as e:
-        # print("Failed to send Discord message:", e)
+        # Silently fail (don't spam console with Discord errors)
         return False
     finally:
         if resp:
