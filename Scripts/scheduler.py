@@ -2,7 +2,7 @@ import time # type: ignore
 
 class ScheduleMonitor:
     """Monitor that checks and applies temperature schedules."""
-    
+
     def __init__(self, ac_monitor, heater_monitor, config, interval=60):
         """
         Initialize schedule monitor.
@@ -21,7 +21,7 @@ class ScheduleMonitor:
         self.current_schedule = None
         self.last_applied_schedule = None
         self.temp_hold_duration = config.get('temp_hold_duration', 3600)  # Use config value, default 1 hour
-    
+
     def should_run(self):
         """Check if it's time to run this monitor."""
         current_time = time.time()
@@ -29,7 +29,7 @@ class ScheduleMonitor:
             self.last_check = current_time
             return True
         return False
-        
+
     def _parse_time(self, time_str):
         """Convert time string 'HH:MM' to minutes since midnight."""
         try:
@@ -39,12 +39,12 @@ class ScheduleMonitor:
             return hours * 60 + minutes
         except:
             return None
-    
+
     def _get_current_minutes(self):
         """Get current time in minutes since midnight."""
         t = time.localtime()
         return t[3] * 60 + t[4]  # hours * 60 + minutes
-    
+
     def _find_active_schedule(self):
         """Find which schedule should be active right now."""
         if not self.config.get('schedule_enabled', False):
@@ -79,7 +79,7 @@ class ScheduleMonitor:
             active_schedule = sorted_schedules[-1][1]
         
         return active_schedule
-    
+
     def _apply_schedule(self, schedule):
         """Apply a schedule's settings to the monitors."""
         if not schedule:
@@ -93,20 +93,20 @@ class ScheduleMonitor:
             # Update AC settings if provided
             if 'ac_target' in schedule:
                 self.ac_monitor.target_temp = float(schedule['ac_target'])
-                self.config['ac_target'] = float(schedule['ac_target'])  # <-- ADD THIS
+                self.config['ac_target'] = float(schedule['ac_target'])
 
             if 'ac_swing' in schedule:
                 self.ac_monitor.temp_swing = float(schedule['ac_swing'])
-                self.config['ac_swing'] = float(schedule['ac_swing'])    # <-- ADD THIS
+                self.config['ac_swing'] = float(schedule['ac_swing'])  
 
             # Update heater settings if provided
             if 'heater_target' in schedule:
                 self.heater_monitor.target_temp = float(schedule['heater_target'])
-                self.config['heater_target'] = float(schedule['heater_target'])  # <-- ADD THIS
+                self.config['heater_target'] = float(schedule['heater_target'])
 
             if 'heater_swing' in schedule:
                 self.heater_monitor.temp_swing = float(schedule['heater_swing'])
-                self.config['heater_swing'] = float(schedule['heater_swing'])    # <-- ADD THIS
+                self.config['heater_swing'] = float(schedule['heater_swing'])
 
             # Save updated config to file so targets persist
             try:
@@ -142,7 +142,7 @@ class ScheduleMonitor:
             
         except Exception as e:
             print("Error applying schedule: {}".format(e))
-    
+
     def run(self):
         """Check if schedule needs to be updated."""
         
@@ -181,7 +181,7 @@ class ScheduleMonitor:
         active_schedule = self._find_active_schedule()
         if active_schedule:
             self._apply_schedule(active_schedule)
-    
+
     def reload_config(self, new_config):
         """Reload configuration (called when settings are updated via web)."""
         self.config = new_config
