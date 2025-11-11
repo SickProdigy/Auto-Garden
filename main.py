@@ -91,11 +91,17 @@ def load_config():
         print("No saved config found, creating default config.json...")
         
         default_config = {
+            'static_ip': '192.168.86.43',
+            'subnet': '255.255.255.0',
+            'gateway': '192.168.86.1',
+            'dns': '192.168.86.1',
             'timezone_offset': -6,     # Timezone offset from UTC (CST=-6, EST=-5, MST=-7, PST=-8, add 1 for DST)
             'ac_target': 75.0,         # Default AC target temp
             'ac_swing': 1.0,           # Default AC tolerance (+/- degrees)
             'heater_target': 72.0,     # Default heater target temp
             'heater_swing': 2.0,       # Default heater tolerance (+/- degrees)
+            'temp_hold_duration': 3600, # Default hold duration in seconds (1 hour)
+            'temp_hold_start_time': None, # No hold active at startup
             'schedules': [             # Default 4 schedules
                 {
                     'time': '06:00',
@@ -169,11 +175,11 @@ wifi = connect_wifi(led)
 
 # Set static IP and print WiFi details
 if wifi and wifi.isconnected():
-    # Configure static IP (easier to bookmark web interface)
-    static_ip = '192.168.86.43'  # Change this to match your network
-    subnet = '255.255.255.0'
-    gateway = '192.168.86.1'     # Usually your router IP
-    dns = '192.168.86.1'         # Usually your router IP
+    # Get static IP settings from config
+    static_ip = config.get('static_ip')
+    subnet = config.get('subnet')
+    gateway = config.get('gateway')
+    dns = config.get('dns')
     
     # Apply static IP configuration
     wifi.ifconfig((static_ip, subnet, gateway, dns))

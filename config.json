@@ -1,4 +1,8 @@
 {
+    "static_ip": "192.168.86.43",
+    "subnet": "255.255.255.0",
+    "gateway": "192.168.86.1",
+    "dns": "192.168.86.1",
     "timezone_offset": -5,
     "ac_target": 77.0,
     "ac_swing": 1.0,

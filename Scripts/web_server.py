@@ -9,7 +9,7 @@ class TempWebServer:
         self.socket = None
         self.sensors = {}
         self.last_page_render = 0  # Track last successful HTML generation
-    
+
     def start(self):
         """Start the web server (non-blocking)."""
         try:
@@ -231,23 +231,16 @@ class TempWebServer:
             import sys
             sys.print_exception(e)
             return False
-    
+
     def _load_config(self):
         """Load configuration from file."""
         try:
             with open('config.json', 'r') as f:
                 return json.load(f)
-        except:
-            return {
-                'ac_target': 77.0,
-                'ac_swing': 1.0,
-                'heater_target': 80.0,
-                'heater_swing': 2.0,
-                'schedules': [],
-                'schedule_enabled': False,
-                'permanent_hold': False
-            }
-    
+        except Exception as e:
+            print("Error loading config:", e)
+            raise  # Or handle as appropriate
+
     def _handle_schedule_update(self, request, sensors, ac_monitor, heater_monitor, schedule_monitor, config):
         """Handle schedule form submission."""
 
@@ -646,7 +639,7 @@ class TempWebServer:
         print("DEBUG: Generating status page...")
         
         # ===== FORCE GARBAGE COLLECTION BEFORE BIG ALLOCATION =====
-        import gc
+        import gc # type: ignore
         gc.collect()
         print("DEBUG: Memory freed, {} bytes available".format(gc.mem_free()))
         # ===== END GARBAGE COLLECTION =====
@@ -1307,8 +1300,8 @@ class TempWebServer:
             
             time_value = schedule.get('time', '')
             name_value = schedule.get('name', '')
-            heater_value = schedule.get('heater_target', config.get('heater_target', 72.0))
-            ac_value = schedule.get('ac_target', config.get('ac_target', 75.0))
+            heater_value = schedule.get('heater_target', config.get('heater_target'))
+            ac_value = schedule.get('ac_target', config.get('ac_target'))
             
             print("DEBUG:   Values: time='{}', name='{}', heater={}, ac={}".format(
                 time_value, name_value, heater_value, ac_value))
@@ -1453,7 +1446,7 @@ class TempWebServer:
         )
         
         return html
-    
+
     def _build_mode_buttons(self, config):
         """Build mode control buttons for dashboard only."""
         schedules = config.get('schedules', [])
@@ -1531,7 +1524,7 @@ class TempWebServer:
                 </div>
             </form>
             """
-            
+    
     def _get_settings_page(self, sensors, ac_monitor, heater_monitor):
         """Generate advanced settings page."""
         config = self._load_config()
@@ -1707,7 +1700,7 @@ class TempWebServer:
         )
         
         return html
-    
+
     def _handle_settings_update(self, request, sensors, ac_monitor, heater_monitor, schedule_monitor, config):
         """Handle advanced settings update."""
         try:
