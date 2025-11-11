@@ -110,8 +110,8 @@ class TemperatureMonitor(Monitor):
             
             # Send to appropriate Discord channel
             if self.send_alerts_to_separate_channel:
-                from scripts.discord_webhook import send_alert_message
-                send_alert_message(alert_message)
+                from scripts.discord_webhook import send_discord_message
+                send_discord_message(alert_message, is_alert=True)
             else:
                 from scripts.discord_webhook import send_discord_message
                 send_discord_message(alert_message)
