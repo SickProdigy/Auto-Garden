@@ -427,7 +427,11 @@ class TempWebServer:
                             "Schedule {}: Temperature values must be numbers".format(i+1),
                             sensors, ac_monitor, heater_monitor
                         )
-                    
+                    # Auto-sync both ways
+                    if heater_target > ac_target:
+                        ac_target = heater_target
+                    elif ac_target < heater_target:
+                        heater_target = ac_target
                     # Create schedule entry
                     schedule = {
                         'time': schedule_time,
@@ -550,17 +554,13 @@ class TempWebServer:
             new_heater_target = params.get('heater_target', config.get('heater_target', 80.0))
             new_ac_target = params.get('ac_target', config.get('ac_target', 77.0))
             
+            # Auto-sync both ways
             if new_heater_target > new_ac_target:
-                print("❌ Validation failed: Heater target ({}) cannot be greater than AC target ({})".format(
-                    new_heater_target, new_ac_target
-                ))
-                return self._get_error_page(
-                    "Invalid Settings",
-                    "Heater target ({:.1f}°F) cannot be greater than AC target ({:.1f}°F)".format(
-                        new_heater_target, new_ac_target
-                    ),
-                    sensors, ac_monitor, heater_monitor
-                )
+                new_ac_target = new_heater_target
+                params['ac_target'] = new_ac_target
+            elif new_ac_target < new_heater_target:
+                new_heater_target = new_ac_target
+                params['heater_target'] = new_heater_target
             # ===== END: Validate Heat <= AC =====
             
             # ===== START: Update AC Settings =====
@@ -1099,6 +1099,28 @@ class TempWebServer:
         ⏰ Last updated: {time}<br>
         🔄 Auto-refresh every 30 seconds
     </div>
+<script>
+document.addEventListener('DOMContentLoaded', function() {{
+    var heaterInput = document.querySelector('input[name="heater_target"]');
+    var acInput = document.querySelector('input[name="ac_target"]');
+    if (heaterInput && acInput) {{
+        heaterInput.addEventListener('input', function() {{
+            var heaterVal = parseFloat(heaterInput.value);
+            var acVal = parseFloat(acInput.value);
+            if (!isNaN(heaterVal) && heaterVal > acVal) {{
+                acInput.value = heaterVal;
+            }}
+        }});
+        acInput.addEventListener('input', function() {{
+            var heaterVal = parseFloat(heaterInput.value);
+            var acVal = parseFloat(acInput.value);
+            if (!isNaN(acVal) && acVal < heaterVal) {{
+                heaterInput.value = acVal;
+            }}
+        }});
+    }}
+}});
+</script>
 </body>
 </html>
             """.format(
@@ -1439,6 +1461,34 @@ class TempWebServer:
                 To change modes (Automatic/Hold), return to the dashboard
             </div>
         </div>
+<script>
+document.addEventListener('DOMContentLoaded', function() {{
+    for (var i = 0; i < 4; i++) {{
+        var heaterInput = document.querySelector('input[name="schedule_' + i + '_heater"]');
+        var acInput = document.querySelector('input[name="schedule_' + i + '_ac"]');
+        if (heaterInput && acInput) {{
+            heaterInput.addEventListener('input', function() {{
+                var idx = this.name.match(/\\d+/)[0];
+                var acInput = document.querySelector('input[name="schedule_' + idx + '_ac"]');
+                var heaterVal = parseFloat(this.value);
+                var acVal = parseFloat(acInput.value);
+                if (!isNaN(heaterVal) && heaterVal > acVal) {{
+                    acInput.value = heaterVal;
+                }}
+            }});
+            acInput.addEventListener('input', function() {{
+                var idx = this.name.match(/\\d+/)[0];
+                var heaterInput = document.querySelector('input[name="schedule_' + idx + '_heater"]');
+                var heaterVal = parseFloat(heaterInput.value);
+                var acVal = parseFloat(this.value);
+                if (!isNaN(acVal) && acVal < heaterVal) {{
+                    heaterInput.value = acVal;
+                }}
+            }});
+        }}
+    }}
+}});
+</script>
     </body>
     </html>
         """.format(
