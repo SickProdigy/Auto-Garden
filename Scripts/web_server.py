@@ -58,12 +58,6 @@ class TempWebServer:
                 bytes_read = len(body_so_far.encode('utf-8'))
                 bytes_needed = content_length - bytes_read
                 
-                # ===== DEBUG: Print body reading info =====
-                print("DEBUG POST: Content-Length = {} bytes".format(content_length))
-                print("DEBUG POST: Already read = {} bytes".format(bytes_read))
-                print("DEBUG POST: Still need = {} bytes".format(bytes_needed))
-                # ===== END DEBUG =====
-                
                 # Read remaining body in loop (recv() may not return all at once!)
                 if bytes_needed > 0:
                     remaining_parts = []
@@ -77,20 +71,9 @@ class TempWebServer:
                             break
                         remaining_parts.append(chunk)
                         total_read += len(chunk)
-                        print("DEBUG POST: Read {} bytes (total: {}/{})".format(
-                            len(chunk), total_read, bytes_needed))
                     
                     remaining = b''.join(remaining_parts)
-                    print("DEBUG POST: Read additional {} bytes (expected {})".format(
-                        len(remaining), bytes_needed))
                     request = request[:header_end] + body_so_far + remaining.decode('utf-8')
-                
-                # ===== DEBUG: Print final body length =====
-                final_body = request[header_end:]
-                print("DEBUG POST: Final body length = {} bytes (expected {})".format(
-                    len(final_body), content_length))
-                print("DEBUG POST: First 100 chars = {}".format(final_body[:100]))
-                # ===== END DEBUG =====
 
             if 'POST /update' in request:
                 response = self._handle_update(request, sensors, ac_monitor, heater_monitor, schedule_monitor, config)
@@ -118,7 +101,6 @@ class TempWebServer:
                 for i in range(0, len(response_bytes), chunk_size):
                     chunk = response_bytes[i:i+chunk_size]
                     conn.sendall(chunk)
-                    print("DEBUG: Sent chunk {} ({} bytes)".format(i//chunk_size + 1, len(chunk)))
                 
                 conn.close()
                 print("DEBUG: Schedule editor page sent successfully ({} bytes total)".format(len(response_bytes)))
@@ -1400,8 +1382,6 @@ document.addEventListener('DOMContentLoaded', function() {{
         # Build schedule inputs
         schedule_inputs = ""
         for i, schedule in enumerate(schedules[:4]):
-            print("DEBUG: Building HTML for schedule {}...".format(i))
-            
             time_value = schedule.get('time', '')
             name_value = schedule.get('name', '')
             heater_value = schedule.get('heater_target', config.get('heater_target'))
