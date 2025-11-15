@@ -202,6 +202,7 @@ if wifi and wifi.isconnected():
     
     # Send startup notification to Discord (with timeout, non-blocking)
     try:
+        gc.collect()  # free heap before HTTPS
         success = discord_webhook.send_discord_message(f"Pico W online at http://{ifconfig[0]} ✅")
         if success:
             print("Discord startup notification sent")
