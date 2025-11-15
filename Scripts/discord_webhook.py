@@ -55,7 +55,7 @@ def send_discord_message(message, username="Auto Garden Bot", is_alert=False, de
         import gc  # type: ignore
         import time  # type: ignore
 
-        gc.collect(); gc.collect()
+        gc.collect()
 
         # Quick mem check before importing urequests/SSL
         mem = getattr(gc, "mem_free", lambda: None)()
@@ -131,6 +131,6 @@ def send_discord_message(message, username="Auto Garden Bot", is_alert=False, de
             pass
         try:
             import gc # type: ignore
-            gc.collect(); gc.collect()
+            gc.collect()
         except:
             pass
