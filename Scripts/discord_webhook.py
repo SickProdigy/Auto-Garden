@@ -27,7 +27,7 @@ def _escape_json_str(s: str) -> str:
     s = s.replace("\t", "\\t")
     return s
 
-def send_discord_message(message, username="Auto Garden Bot", is_alert=False):
+def send_discord_message(message, username="Auto Garden Bot", is_alert=False, debug: bool = False):
     """
     Send Discord message with aggressive GC and low-memory guard to avoid ENOMEM.
     Returns True on success, False otherwise.
@@ -52,12 +52,23 @@ def send_discord_message(message, username="Auto Garden Bot", is_alert=False):
         import gc  # type: ignore
         gc.collect()
         gc.collect()  # run twice as a precaution
+        if debug:
+            try:
+                print("DBG: mem after gc:", gc.mem_free() // 1024, "KB")
+            except:
+                pass
 
         # 1b) quick mem check - avoid importing urequests/TLS when too low
         try:
             mem = getattr(gc, "mem_free", lambda: None)()
+            if debug:
+                try:
+                    print("DBG: mem before import check:", (mem or 0) // 1024, "KB")
+                except:
+                    pass
             # lower threshold to match this board's free heap (~100 KB observed)
             if mem is not None and mem < 90000:
+                if debug: print("DBG: skipping send (mem low)")
                 return False
         except:
             pass
@@ -65,6 +76,9 @@ def send_discord_message(message, username="Auto Garden Bot", is_alert=False):
         try:
             # 2) Import urequests locally (keeps RAM free when idle)
             import urequests as requests  # type: ignore
+            # import here to measure allocation impact
+            if debug:
+                print("DBG: importing urequests...")
         except Exception as e:
             # import likely failed due to ENOMEM or missing module; back off
             # do not spam full exception text to conserve heap and serial output
@@ -77,6 +91,11 @@ def send_discord_message(message, username="Auto Garden Bot", is_alert=False):
             return False
 
         gc.collect()  # collect again after import to reduce fragmentation
+        if debug:
+            try:
+                print("DBG: mem after import:", gc.mem_free() // 1024, "KB")
+            except:
+                pass
 
         # 3) Keep payload tiny
         url = str(url).strip().strip('\'"')
@@ -88,7 +107,17 @@ def send_discord_message(message, username="Auto Garden Bot", is_alert=False):
         headers = {"Content-Type": "application/json"}
 
         # 4) Send
+        if debug:
+            try:
+                print("DBG: mem before post:", gc.mem_free() // 1024, "KB")
+            except:
+                pass
         resp = requests.post(url, data=body_bytes, headers=headers)
+        if debug:
+            try:
+                print("DBG: mem after post:", gc.mem_free() // 1024, "KB", "status:", getattr(resp, "status", None))
+            except:
+                pass
 
         status = getattr(resp, "status", getattr(resp, "status_code", None))
         return bool(status and 200 <= status < 300)
