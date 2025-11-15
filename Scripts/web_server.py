@@ -537,6 +537,7 @@ class TempWebServer:
                 if heater_monitor:
                     heater_monitor.target_temp = config['heater_target']
                     heater_monitor.temp_swing = config['heater_swing']
+            del schedules, params, prev_schedules, prev
             gc.collect()
             # Send Discord notification
             try:
