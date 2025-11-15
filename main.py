@@ -369,95 +369,119 @@ retry_ntp_attempts = 0
 max_ntp_attempts = 5  # Try up to 5 times after initial failure
 last_ntp_sync = time.time()  # Track when we last synced
 
-# ===== START: Main Loop =====
-# Main monitoring loop (runs forever until Ctrl+C)
-last_monitor_run = {
-    "wifi": 0,
-    "schedule": 0,
-    "ac": 0,
-    "heater": 0,
-    "inside_temp": 0,
-    "outside_temp": 0,
-}
-
-while True:
-    now = time.time()
-
-    # WiFi monitor every 5 seconds (can be stateless)
-    if now - last_monitor_run["wifi"] >= 5:
-        from scripts.monitors import WiFiMonitor
-        wifi_monitor = WiFiMonitor(wifi, led, interval=5, reconnect_cooldown=60, config=config)
-        try:
-            wifi_monitor.run()
-        except Exception as e:
-            print("WiFiMonitor error:", e)
-        del wifi_monitor
-        gc.collect()
-        last_monitor_run["wifi"] = now
-
-    # Schedule monitor every 60 seconds (persistent)
-    if now - last_monitor_run["schedule"] >= 60:
-        try:
-            schedule_monitor.run()
-        except Exception as e:
-            print("ScheduleMonitor error:", e)
-        last_monitor_run["schedule"] = now
-
-    # AC monitor every 30 seconds (persistent)
-    if now - last_monitor_run["ac"] >= 30:
-        try:
-            ac_monitor.run()
-        except Exception as e:
-            print("ACMonitor error:", e)
-        last_monitor_run["ac"] = now
-
-    # Heater monitor every 30 seconds (persistent)
-    if now - last_monitor_run["heater"] >= 30:
-        try:
-            heater_monitor.run()
-        except Exception as e:
-            print("HeaterMonitor error:", e)
-        last_monitor_run["heater"] = now
-
-    # Inside temperature monitor every 10 seconds (can be stateless)
-    if now - last_monitor_run["inside_temp"] >= 10:
-        from scripts.monitors import TemperatureMonitor
-        inside_monitor = TemperatureMonitor(
-            sensor=sensors['inside'],
-            label=SENSOR_CONFIG['inside']['label'],
-            check_interval=10,
-            report_interval=30,
-            alert_high=SENSOR_CONFIG['inside']['alert_high'],
-            alert_low=SENSOR_CONFIG['inside']['alert_low'],
-            log_file="/temp_logs.csv",
-            send_alerts_to_separate_channel=True
-        )
-        inside_monitor.run()
-        del inside_monitor
-        gc.collect()
-        last_monitor_run["inside_temp"] = now
-
-    # Outside temperature monitor every 10 seconds (can be stateless)
-    if now - last_monitor_run["outside_temp"] >= 10:
-        from scripts.monitors import TemperatureMonitor
-        outside_monitor = TemperatureMonitor(
-            sensor=sensors['outside'],
-            label=SENSOR_CONFIG['outside']['label'],
-            check_interval=10,
-            report_interval=30,
-            alert_high=SENSOR_CONFIG['outside']['alert_high'],
-            alert_low=SENSOR_CONFIG['outside']['alert_low'],
-            log_file="/temp_logs.csv",
-            send_alerts_to_separate_channel=False
-        )
-        outside_monitor.run()
-        del outside_monitor
-        gc.collect()
-        last_monitor_run["outside_temp"] = now
-
-    # Web requests (keep web server loaded if needed)
-    web_server.check_requests(sensors, ac_monitor, heater_monitor, schedule_monitor, config)
-
-    gc.collect()
-    time.sleep(0.1)
-# ===== END: Main Loop =====
+try:
+    while True:
+        
+        # ===== START: Main Loop =====
+        # Main monitoring loop (runs forever until Ctrl+C)
+        last_monitor_run = {
+            "wifi": 0,
+            "schedule": 0,
+            "ac": 0,
+            "heater": 0,
+            "inside_temp": 0,
+            "outside_temp": 0,
+        }
+        
+        while True:
+            now = time.time()
+        
+            # WiFi monitor every 5 seconds (can be stateless)
+            if now - last_monitor_run["wifi"] >= 5:
+                from scripts.monitors import WiFiMonitor
+                wifi_monitor = WiFiMonitor(wifi, led, interval=5, reconnect_cooldown=60, config=config)
+                try:
+                    wifi_monitor.run()
+                except Exception as e:
+                    print("WiFiMonitor error:", e)
+                del wifi_monitor
+                gc.collect()
+                last_monitor_run["wifi"] = now
+        
+            # Schedule monitor every 60 seconds (persistent)
+            if now - last_monitor_run["schedule"] >= 60:
+                try:
+                    schedule_monitor.run()
+                except Exception as e:
+                    print("ScheduleMonitor error:", e)
+                last_monitor_run["schedule"] = now
+        
+            # AC monitor every 30 seconds (persistent)
+            if now - last_monitor_run["ac"] >= 30:
+                try:
+                    ac_monitor.run()
+                except Exception as e:
+                    print("ACMonitor error:", e)
+                last_monitor_run["ac"] = now
+        
+            # Heater monitor every 30 seconds (persistent)
+            if now - last_monitor_run["heater"] >= 30:
+                try:
+                    heater_monitor.run()
+                except Exception as e:
+                    print("HeaterMonitor error:", e)
+                last_monitor_run["heater"] = now
+        
+            # Inside temperature monitor every 10 seconds (can be stateless)
+            if now - last_monitor_run["inside_temp"] >= 10:
+                from scripts.monitors import TemperatureMonitor
+                inside_monitor = TemperatureMonitor(
+                    sensor=sensors['inside'],
+                    label=SENSOR_CONFIG['inside']['label'],
+                    check_interval=10,
+                    report_interval=30,
+                    alert_high=SENSOR_CONFIG['inside']['alert_high'],
+                    alert_low=SENSOR_CONFIG['inside']['alert_low'],
+                    log_file="/temp_logs.csv",
+                    send_alerts_to_separate_channel=True
+                )
+                inside_monitor.run()
+                del inside_monitor
+                gc.collect()
+                last_monitor_run["inside_temp"] = now
+        
+            # Outside temperature monitor every 10 seconds (can be stateless)
+            if now - last_monitor_run["outside_temp"] >= 10:
+                from scripts.monitors import TemperatureMonitor
+                outside_monitor = TemperatureMonitor(
+                    sensor=sensors['outside'],
+                    label=SENSOR_CONFIG['outside']['label'],
+                    check_interval=10,
+                    report_interval=30,
+                    alert_high=SENSOR_CONFIG['outside']['alert_high'],
+                    alert_low=SENSOR_CONFIG['outside']['alert_low'],
+                    log_file="/temp_logs.csv",
+                    send_alerts_to_separate_channel=False
+                )
+                outside_monitor.run()
+                del outside_monitor
+                gc.collect()
+                last_monitor_run["outside_temp"] = now
+        
+            # Web requests (keep web server loaded if needed)
+            web_server.check_requests(sensors, ac_monitor, heater_monitor, schedule_monitor, config)
+        
+            gc.collect()
+            time.sleep(0.1)
+        # ===== END: Main Loop =====
+except KeyboardInterrupt:
+    print("\n" + "="*50)
+    print("Shutting down gracefully...")
+    print("="*50)
+    try:
+        print("Turning off AC...")
+        ac_controller.turn_off()
+    except Exception as e:
+        print("AC shutdown error:", e)
+    try:
+        print("Turning off heater...")
+        heater_controller.turn_off()
+    except Exception as e:
+        print("Heater shutdown error:", e)
+    try:
+        print("Turning off LED...")
+        led.low()
+    except Exception as e:
+        print("LED shutdown error:", e)
+    print("Shutdown complete!")
+    print("="*50)
