@@ -60,19 +60,19 @@ def send_discord_message(message, username="Auto Garden Bot", is_alert=False, de
         # Quick mem check before importing urequests/SSL
         mem = getattr(gc, "mem_free", lambda: None)()
         # Require larger headroom based on device testing (adjust if you re-test)
-        if mem is not None and mem < 150000:
-            # quietly skip send when memory is insufficient
+        if mem is not None and mem < 105000:
+            print("Discord send skipped: ENOMEM ({} bytes free)".format(mem))
             return False
 
         # Import urequests only when we plan to send
         try:
             import urequests as requests  # type: ignore
-        except Exception:
+        except Exception as e:
+            print("Discord send failed: urequests import error:", e)
             try:
                 _NEXT_ALLOWED_SEND_TS = time.time() + 60
             except:
                 pass
-            # quiet failure to avoid spamming serial; caller can check return value
             return False
 
         gc.collect()
@@ -93,14 +93,13 @@ def send_discord_message(message, username="Auto Garden Bot", is_alert=False, de
         return bool(status and 200 <= status < 300)
 
     except Exception as e:
-        # On ENOMEM/MemoryError back off
+        print("Discord send failed:", e)
         try:
             if ("ENOMEM" in str(e)) or isinstance(e, MemoryError):
                 import time  # type: ignore
                 _NEXT_ALLOWED_SEND_TS = time.time() + 60
         except:
             pass
-        # quiet exception path; return False for caller to handle/backoff
         return False
 
     finally:
