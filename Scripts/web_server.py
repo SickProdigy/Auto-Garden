@@ -1470,70 +1470,6 @@ document.addEventListener('DOMContentLoaded', function() {{
             .btn:hover {{ transform: translateY(-2px); }}
         </style>
         
-        <script defer>
-        document.addEventListener('DOMContentLoaded', function() {{
-            var form = document.querySelector('form[action="/schedule"]');
-            if (!form) return;
-    
-            function getPairByTarget(t) {{
-                var m = t.name && t.name.match(/^schedule_(\d+)_(heater|ac)$/);
-                if (!m) return null;
-                var i = m[1];
-                return {{
-                    heater: form.querySelector('input[name="schedule_' + i + '_heater"]'),
-                    ac: form.querySelector('input[name="schedule_' + i + '_ac"]')
-                }};
-            }}
-    
-            function syncFromHeater(h, a) {{
-                var hv = parseFloat(h.value), av = parseFloat(a.value);
-                if (!isNaN(hv) && !isNaN(av) && hv > av) a.value = hv;
-            }}
-    
-            function syncFromAc(h, a) {{
-                var hv = parseFloat(h.value), av = parseFloat(a.value);
-                if (!isNaN(hv) && !isNaN(av) && av < hv) h.value = av;
-            }}
-    
-            // Live sync via event delegation (all rows)
-            form.addEventListener('input', function(e) {{
-                if (!e.target.name) return;
-                var pair = getPairByTarget(e.target);
-                if (!pair || !pair.heater || !pair.ac) return;
-                if (e.target.name.endsWith('_heater')) syncFromHeater(pair.heater, pair.ac);
-                else if (e.target.name.endsWith('_ac')) syncFromAc(pair.heater, pair.ac);
-            }});
-    
-            form.addEventListener('change', function(e) {{
-                if (!e.target.name) return;
-                var pair = getPairByTarget(e.target);
-                if (!pair || !pair.heater || !pair.ac) return;
-                if (e.target.name.endsWith('_heater')) syncFromHeater(pair.heater, pair.ac);
-                else if (e.target.name.endsWith('_ac')) syncFromAc(pair.heater, pair.ac);
-            }});
-    
-            // Normalize on load
-            for (var i = 0; i < 4; i++) {{
-                var h = form.querySelector('input[name="schedule_' + i + '_heater"]');
-                var a = form.querySelector('input[name="schedule_' + i + '_ac"]');
-                if (h && a) syncFromHeater(h, a);
-            }}
-    
-            // Normalize on submit to guarantee posted values
-            form.addEventListener('submit', function() {{
-                for (var i = 0; i < 4; i++) {{
-                    var h = form.querySelector('input[name="schedule_' + i + '_heater"]');
-                    var a = form.querySelector('input[name="schedule_' + i + '_ac"]');
-                    if (!h || !a) continue;
-                    var hv = parseFloat(h.value), av = parseFloat(a.value);
-                    if (isNaN(hv) || isNaN(av)) continue;
-                    if (hv > av) a.value = hv;   // heat up → raise AC
-                    if (av < hv) h.value = av;   // AC down → lower heat
-                }}
-            }});
-        }});
-        </script>
-        
     </head>
     <body>
         <div class="container">
@@ -1570,6 +1506,71 @@ document.addEventListener('DOMContentLoaded', function() {{
                 To change modes (Automatic/Hold), return to the dashboard
             </div>
         </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {{
+    var form = document.querySelector('form[action="/schedule"]');
+    if (!form) return;
+
+    // Return [heaterInput, acInput, whichField] to avoid object literals (fewer braces)
+    function getPair(t) {{
+        if (!t || !t.name) return null;
+        var m = t.name.match(/^schedule_(\d+)_(heater|ac)$/);
+        if (!m) return null;
+        var i = m[1];
+        var which = m[2];
+        var h = form.querySelector('input[name="schedule_' + i + '_heater"]');
+        var a = form.querySelector('input[name="schedule_' + i + '_ac"]');
+        if (!h || !a) return null;
+        return [h, a, which];
+    }}
+
+    function syncFromHeater(h, a) {{
+        var hv = parseFloat(h.value), av = parseFloat(a.value);
+        if (!isNaN(hv) && !isNaN(av) && hv > av) a.value = hv;
+    }}
+
+    function syncFromAc(h, a) {{
+        var hv = parseFloat(h.value), av = parseFloat(a.value);
+        if (!isNaN(hv) && !isNaN(av) && av < hv) h.value = av;
+    }}
+
+    // Live sync via event delegation
+    form.addEventListener('input', function(e) {{
+        var p = getPair(e.target);
+        if (!p) return;
+        if (p[2] === 'heater') syncFromHeater(p[0], p[1]);
+        else syncFromAc(p[0], p[1]);
+    }});
+
+    form.addEventListener('change', function(e) {{
+        var p = getPair(e.target);
+        if (!p) return;
+        if (p[2] === 'heater') syncFromHeater(p[0], p[1]);
+        else syncFromAc(p[0], p[1]);
+    }});
+
+    // Normalize on load
+    for (var i = 0; i < 4; i++) {{
+        var h = form.querySelector('input[name="schedule_' + i + '_heater"]');
+        var a = form.querySelector('input[name="schedule_' + i + '_ac"]');
+        if (h && a) syncFromHeater(h, a);
+    }}
+
+    // Guarantee posted values are valid on submit
+    form.addEventListener('submit', function() {{
+        for (var i = 0; i < 4; i++) {{
+            var h = form.querySelector('input[name="schedule_' + i + '_heater"]');
+            var a = form.querySelector('input[name="schedule_' + i + '_ac"]');
+            if (!h || !a) continue;
+            var hv = parseFloat(h.value), av = parseFloat(a.value);
+            if (isNaN(hv) || isNaN(av)) continue;
+            if (hv > av) a.value = hv;   // heat up → raise AC
+            if (av < hv) h.value = av;   // AC down → lower heat
+        }}
+    }});
+}});
+</script>
 
     </body>
     </html>
