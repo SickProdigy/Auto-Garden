@@ -1387,10 +1387,10 @@ document.addEventListener('DOMContentLoaded', function() {{
             schedule_inputs += '<input type="text" name="schedule_' + str(i) + '_name" value="' + str(name_value) + '" placeholder="Schedule ' + str(i+1) + '">\n'
             schedule_inputs += '<label>Heater (°F)</label>\n'
             # Add required attribute to force validation
-            schedule_inputs += '<input type="number" name="schedule_' + str(i) + '_heater" value="' + str(heater_value) + '" step="0.5" min="60" max="85" required>\n'
+            schedule_inputs += "<input type=\"number\" name=\"schedule_" + str(i) + "_heater\" value=\"" + str(heater_value) + "\" step=\"0.5\" min=\"60\" max=\"85\" required oninput=\"schedSync(" + str(i) + ", 'heater')\" onchange=\"schedSync(" + str(i) + ", 'heater')\">\n"
             schedule_inputs += '<label>AC (°F)</label>\n'
             # Add required attribute to force validation
-            schedule_inputs += '<input type="number" name="schedule_' + str(i) + '_ac" value="' + str(ac_value) + '" step="0.5" min="60" max="90" required>\n'
+            schedule_inputs += "<input type=\"number\" name=\"schedule_" + str(i) + "_ac\" value=\"" + str(ac_value) + "\" step=\"0.5\" min=\"60\" max=\"90\" required oninput=\"schedSync(" + str(i) + ", 'ac')\" onchange=\"schedSync(" + str(i) + ", 'ac')\">\n"
             schedule_inputs += '</div>\n'
             
             print("DEBUG:   HTML generated, length now: {} bytes".format(len(schedule_inputs)))
@@ -1508,88 +1508,43 @@ document.addEventListener('DOMContentLoaded', function() {{
         </div>
 
 <script>
+// Make schedSync available to inline handlers immediately
+window.schedSync = function(i, which) {{
+    var h = document.querySelector('input[name="schedule_' + i + '_heater"]');
+    var a = document.querySelector('input[name="schedule_' + i + '_ac"]');
+    var last = document.getElementById('schedule_' + i + '_last_changed');
+    if (!h || !a) return;
+    var hv = parseFloat(h.value), av = parseFloat(a.value);
+
+    if (which === 'heater') {{
+        if (!isNaN(hv) && !isNaN(av) && hv > av) {{ a.value = hv; }}
+        if (last) last.value = 'heater';
+    }} else {{
+        if (!isNaN(hv) && !isNaN(av) && av < hv) {{ h.value = av; }}
+        if (last) last.value = 'ac';
+    }}
+}};
+
 document.addEventListener('DOMContentLoaded', function() {{
+    // Submit-time safety: enforce rule per row
     var form = document.querySelector('form[action="/schedule"]');
-    if (!form) return;
+    if (form) {{
+        form.addEventListener('submit', function() {{
+            for (var i = 0; i < 4; i++) {{
+                var h = document.querySelector('input[name="schedule_' + i + '_heater"]');
+                var a = document.querySelector('input[name="schedule_' + i + '_ac"]');
+                var last = document.getElementById('schedule_' + i + '_last_changed');
+                if (!h || !a) continue;
+                var hv = parseFloat(h.value), av = parseFloat(a.value);
+                if (isNaN(hv) || isNaN(av)) continue;
 
-    function getPair(t) {{
-        if (!t || !t.name) return null;
-        var m = t.name.match(/^schedule_(\\d+)_(heater|ac)$/);
-        if (!m) return null;
-        var i = m[1];
-        var which = m[2];
-        var h = form.querySelector('input[name="schedule_' + i + '_heater"]');
-        var a = form.querySelector('input[name="schedule_' + i + '_ac"]');
-        var last = form.querySelector('input[name="schedule_' + i + '_last_changed"]');
-        if (!h || !a) return null;
-        return [h, a, which, last];
-    }}
-
-    function syncFromHeater(h, a) {{
-        var hv = parseFloat(h.value), av = parseFloat(a.value);
-        if (!isNaN(hv) && !isNaN(av) && hv > av) a.value = hv;
-    }}
-
-    function syncFromAc(h, a) {{
-        var hv = parseFloat(h.value), av = parseFloat(a.value);
-        if (!isNaN(hv) && !isNaN(av) && av < hv) h.value = av;
-    }}
-
-    // Live sync + mark last_changed
-    form.addEventListener('input', function(e) {{
-        var p = getPair(e.target);
-        if (!p) return;
-        var h = p[0], a = p[1], which = p[2], last = p[3];
-        if (which === 'heater') {{
-            if (last) last.value = 'heater';
-            syncFromHeater(h, a);
-        }} else {{
-            if (last) last.value = 'ac';
-            syncFromAc(h, a);
-        }}
-    }});
-
-    form.addEventListener('change', function(e) {{
-        var p = getPair(e.target);
-        if (!p) return;
-        var h = p[0], a = p[1], which = p[2], last = p[3];
-        if (which === 'heater') {{
-            if (last) last.value = 'heater';
-            syncFromHeater(h, a);
-        }} else {{
-            if (last) last.value = 'ac';
-            syncFromAc(h, a);
-        }}
-    }});
-
-    // Normalize on load (ensure AC >= Heat)
-    for (var i = 0; i < 4; i++) {{
-        var h = form.querySelector('input[name="schedule_' + i + '_heater"]');
-        var a = form.querySelector('input[name="schedule_' + i + '_ac"]');
-        if (h && a) syncFromHeater(h, a);
-    }}
-
-    // Submit-time normalize (use last_changed to decide direction)
-    form.addEventListener('submit', function() {{
-        for (var i = 0; i < 4; i++) {{
-            var h = form.querySelector('input[name="schedule_' + i + '_heater"]');
-            var a = form.querySelector('input[name="schedule_' + i + '_ac"]');
-            var last = form.querySelector('input[name="schedule_' + i + '_last_changed"]');
-            if (!h || !a) continue;
-
-            var hv = parseFloat(h.value), av = parseFloat(a.value);
-            if (isNaN(hv) || isNaN(av)) continue;
-
-            if (hv > av) {{
-                // Heater above AC: either raise AC or lower Heater based on last edit
-                if (last && last.value === 'ac') {{
-                    h.value = av;   // user lowered AC → match heat down
-                }} else {{
-                    a.value = hv;   // user raised Heat (or unknown) → match AC up
+                if (hv > av) {{
+                    if (last && last.value === 'ac') {{ h.value = av; }}
+                    else {{ a.value = hv; }}
                 }}
             }}
-        }}
-    }});
+        }});
+    }}
 }});
 </script>
 
