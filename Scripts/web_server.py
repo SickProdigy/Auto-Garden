@@ -1539,8 +1539,8 @@ document.addEventListener('DOMContentLoaded', function() {{
                 if (isNaN(hv) || isNaN(av)) continue;
 
                 if (hv > av) {{
-                    if (last && last.value === 'ac') {{ h.value = av; }}
-                    else {{ a.value = hv; }}
+                    if (last && last.value === 'ac') {{ h.value = av; }}   // AC lowered → match heat down
+                    else {{ a.value = hv; }}                               // Heat raised → match AC up
                 }}
             }}
         }});
