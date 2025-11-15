@@ -131,7 +131,7 @@ def send_discord_message(message, username="Auto Garden Bot", is_alert=False, de
         except:
             pass
         try:
-            import gc
+            import gc # type: ignore
             gc.collect(); gc.collect()
         except:
             pass

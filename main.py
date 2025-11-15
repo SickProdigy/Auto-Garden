@@ -144,6 +144,11 @@ def load_config():
         
         return default_config
 
+# global variables for Discord webhook status
+discord_sent = False
+discord_send_attempts = 0
+pending_discord_message = None
+
 # Load configuration from file
 config = load_config()
 import scripts.discord_webhook as discord_webhook
@@ -200,16 +205,22 @@ if wifi and wifi.isconnected():
     print(f"Web Interface:  http://{ifconfig[0]}")
     print("="*50 + "\n")
     
-    # Send startup notification to Discord (schedule for later to avoid ENOMEM)
-    try:
-        gc.collect()  # free heap before HTTPS attempt
-        # don't attempt HTTP/TLS immediately — schedule for retry from main loop
+    # Try sending Discord webhook NOW, before creating other objects
+    gc.collect()
+    mem_ok = gc.mem_free() > 140000
+    if mem_ok:
+        ok = discord_webhook.send_discord_message("Pico W online at http://{}".format(ifconfig[0]), debug=False)
+        if ok:
+            print("Discord startup notification sent")
+            discord_sent = True
+        else:
+            print("Discord startup notification failed")
+            pending_discord_message = "Pico W online at http://{}".format(ifconfig[0])
+            discord_send_attempts = 1
+    else:
+        print("Not enough memory for Discord startup notification")
         pending_discord_message = "Pico W online at http://{}".format(ifconfig[0])
-        discord_send_attempts = 0
-        discord_sent = False
-        print("Startup discord message queued (will send when memory available)")
-    except Exception as e:
-        print("Discord notification scheduling error: {}".format(e))
+        discord_send_attempts = 1
     
     # Start web server early so page can load even if time sync is slow
     web_server = TempWebServer(port=80)
@@ -401,33 +412,26 @@ last_ntp_sync = time.time()  # Track when we last synced
 while True:
     try:
         # Try to send pending discord startup message when memory permits
-        try:
-            if not globals().get('discord_sent', True) and globals().get('pending_discord_message'):
-                import gc as _gc  # type: ignore
-                # run GC before measuring free memory
-                _gc.collect()
-                _gc.collect()
-                # require larger headroom (observed successful test ~174 KB free)
-                mem_ok = getattr(_gc, 'mem_free', lambda: 0)() > 140000
-                if mem_ok:
-                    try:
-                        # production send: don't enable verbose debug prints here
-                        ok = discord_webhook.send_discord_message(pending_discord_message, debug=False)
-                        if ok:
-                            print("Discord startup notification sent")
-                            discord_sent = True
-                        else:
-                            discord_send_attempts += 1
-                            if discord_send_attempts >= 3:
-                                print("Discord startup notification failed after retries")
-                                discord_sent = True
-                    except Exception:
-                        # swallow errors here; discord module already handles backoff
+        if not discord_sent and pending_discord_message and discord_send_attempts < 3:
+            import gc as _gc  # type: ignore
+            _gc.collect()
+            _gc.collect()
+            mem_ok = getattr(_gc, 'mem_free', lambda: 0)() > 140000
+            if mem_ok:
+                try:
+                    ok = discord_webhook.send_discord_message(pending_discord_message, debug=False)
+                    if ok:
+                        print("Discord startup notification sent")
+                        discord_sent = True
+                    else:
                         discord_send_attempts += 1
                         if discord_send_attempts >= 3:
+                            print("Discord startup notification failed after retries")
                             discord_sent = True
-        except Exception:
-            pass
+                except Exception:
+                    discord_send_attempts += 1
+                    if discord_send_attempts >= 3:
+                        discord_sent = True
 
         # Run all monitors (each checks if it's time to run via should_run())
         run_monitors(monitors)
