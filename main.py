@@ -404,8 +404,11 @@ while True:
         try:
             if not globals().get('discord_sent', True) and globals().get('pending_discord_message'):
                 import gc as _gc  # type: ignore
+                # run GC before measuring free memory
+                _gc.collect()
+                _gc.collect()
                 # require a conservative free memory threshold before TLS (adjust to your device)
-                mem_ok = getattr(_gc, 'mem_free', lambda: 0)() > 90000
+                mem_ok = getattr(_gc, 'mem_free', lambda: 0)() > 140000
                 if mem_ok:
                     try:
                         ok = discord_webhook.send_discord_message(pending_discord_message)
@@ -417,8 +420,8 @@ while True:
                             if discord_send_attempts >= 3:
                                 print("Discord startup notification failed after retries")
                                 discord_sent = True
-                    except Exception as e:
-                        print("Discord notification error: {}".format(e))
+                    except Exception:
+                        # swallow errors here; discord module already handles backoff
                         discord_send_attempts += 1
                         if discord_send_attempts >= 3:
                             discord_sent = True

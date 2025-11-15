@@ -56,7 +56,8 @@ def send_discord_message(message, username="Auto Garden Bot", is_alert=False):
         # 1b) quick mem check - avoid importing urequests/TLS when too low
         try:
             mem = getattr(gc, "mem_free", lambda: None)()
-            if mem is not None and mem < 90000:  # conservative threshold (adjust to your board)
+            # raised threshold to reduce chance of spike during TLS/requests
+            if mem is not None and mem < 140000:
                 return False
         except:
             pass
@@ -65,8 +66,14 @@ def send_discord_message(message, username="Auto Garden Bot", is_alert=False):
             # 2) Import urequests locally (keeps RAM free when idle)
             import urequests as requests  # type: ignore
         except Exception as e:
-            # if import fails due to ENOMEM or missing module, back off
-            print("Discord webhook import failed:", e)
+            # import likely failed due to ENOMEM or missing module; back off
+            # do not spam full exception text to conserve heap and serial output
+            try:
+                import time  # type: ignore
+                _NEXT_ALLOWED_SEND_TS = time.time() + 60
+            except:
+                pass
+            print("Discord webhook import failed (backing off)")
             return False
 
         gc.collect()  # collect again after import to reduce fragmentation
@@ -87,14 +94,15 @@ def send_discord_message(message, username="Auto Garden Bot", is_alert=False):
         return bool(status and 200 <= status < 300)
 
     except Exception as e:
-        # On ENOMEM/MemoryError, back off for 30 seconds to avoid repeated failures
+        # On ENOMEM/MemoryError, back off for longer to avoid repeated failures
         try:
             if ("ENOMEM" in str(e)) or isinstance(e, MemoryError):
                 import time  # type: ignore
-                _NEXT_ALLOWED_SEND_TS = time.time() + 30
+                _NEXT_ALLOWED_SEND_TS = time.time() + 60
         except:
             pass
-        print("Discord webhook exception:", e)
+        # print concise message only
+        print("Discord webhook exception (backing off)")
         return False
 
     finally:
