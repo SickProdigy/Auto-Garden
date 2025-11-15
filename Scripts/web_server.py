@@ -537,7 +537,7 @@ class TempWebServer:
                 if heater_monitor:
                     heater_monitor.target_temp = config['heater_target']
                     heater_monitor.temp_swing = config['heater_swing']
-            del schedules, params, prev_schedules, prev
+            del params, prev_schedules, prev
             gc.collect()
             # Send Discord notification
             try:
@@ -549,7 +549,8 @@ class TempWebServer:
             except:
                 pass
             # ===== END: Handle schedule configuration save =====
-            
+            del schedules
+            gc.collect()
             # Redirect back to homepage with cache-busting headers
             redirect_response = 'HTTP/1.1 303 See Other\r\n'
             redirect_response += 'Location: /\r\n'
